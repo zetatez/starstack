@@ -28,17 +28,17 @@ COPY --from=frontend /web/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# Run as a non-root user owned directories.
-RUN mkdir -p /app/data /share \
-    && chown -R nginx:nginx /app /share \
-    && chmod +x /usr/local/bin/entrypoint.sh
+# Runtime runs as root so bind-mounted host directories (which docker may
+# create as root-owned) are writable out of the box. For a private host this
+# is the pragmatic default; re-harden with a non-root user if you pin host
+# dir ownership accordingly.
+RUN mkdir -p /app/data /share && chmod +x /usr/local/bin/entrypoint.sh
 
 # Internal API listen port (nginx reverse-proxies to this). Overridable by env.
 ENV LISTEN=:8080 \
     DATA_DIR=/app/data \
     SHARE_ROOT=/share
 
-USER nginx
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
   CMD wget -q -O - http://127.0.0.1/api/health || exit 1

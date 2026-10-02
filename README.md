@@ -50,13 +50,13 @@ docker compose up -d --build
 
 环境变量（全部可选，见 docs/DESIGN.md §12）：
 
-| 变量 | 默认 | 说明 |
-|------|------|------|
-| `LISTEN` | `:8290` | 后端监听 |
-| `DATA_DIR` | `/app/data` | SQLite、个人空间、缓存 |
-| `SHARE_ROOT` | `/share` | 共享盘挂载点 |
-| `SECRET` | 自动生成 | JWT/分享签名密钥（留空随机生成并持久化） |
-| `LOG_LEVEL` | `info` | `info` / `debug` |
+| 变量         | 默认        | 说明                                     |
+| ------       | ------      | ------                                   |
+| `LISTEN`     | `:8290`     | 后端监听                                 |
+| `DATA_DIR`   | `/app/data` | SQLite、个人空间、缓存                   |
+| `SHARE_ROOT` | `/share`    | 共享盘挂载点                             |
+| `SECRET`     | 自动生成    | JWT/分享签名密钥（留空随机生成并持久化） |
+| `LOG_LEVEL`  | `info`      | `info` / `debug`                         |
 
 ## 测试
 
