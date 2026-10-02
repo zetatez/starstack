@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # ---- build backend ----
-FROM golang:1.24-alpine AS backend
+FROM golang:1.26-alpine AS backend
 ARG VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./

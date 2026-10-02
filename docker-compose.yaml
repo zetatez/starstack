@@ -5,7 +5,6 @@ services:
       dockerfile: Dockerfile
       args:
         VERSION: ${VERSION:-dev}
-      # 受限环境无 veth 时构建需走宿主网络；支持默认 bridge 则可删去
       network: host
     image: starstack:latest
     restart: unless-stopped
@@ -14,8 +13,9 @@ services:
       - "${PORT:-8290}:80"
 
     volumes:
-      - ./data:/app/data:rw                        # 数据：SQLite + 个人空间 + 缓存
-      - ${SHARE_DIR:-/data/cloud}:/share:rw        # 宿主机目录 → 共享盘
+      - ~/git/docker/starstack:/app/data:rw # 数据：SQLite + 个人空间 + 缓存
+      - ${SHARE_DIR:-/home/shiyi/x}:/share:rw # 宿主机目录 → 共享盘
 
     environment:
-      - SECRET=${SECRET:-}          # 见根目录 .env；留空则首次启动自动生成并落盘
+      - SECRET=${SECRET:-} # 见根目录 .env；留空则首次启动自动生成并落盘
+
