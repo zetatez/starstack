@@ -314,10 +314,12 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
                         className={`${it.name.startsWith('.') ? 'ghidden ' : ''}${sel.has(it.full) ? 'sel' : ''}`}
                         onClick={() => toggleSel(it.full)} onDoubleClick={() => openItem(it)} onContextMenu={(e) => openMenu(e, it)}>
                       <td className="chk">
-                        {it.is_dir ? '📁' : '📄'}
                         <input className="row-chk" type="checkbox" checked={sel.has(it.full)} onChange={() => toggleSel(it.full)} onClick={(e) => e.stopPropagation()} />
                       </td>
-                      <td><button className="link" onClick={(e) => { e.stopPropagation(); openItem(it); }}>{it.name}</button></td>
+                      <td className="namecell">
+                        <span className="type">{it.is_dir ? '📁' : '📄'}</span>
+                        <button className="link" onClick={(e) => { e.stopPropagation(); openItem(it); }}>{it.name}</button>
+                      </td>
                       <td>{it.is_dir ? '—' : fmtSize(it.size)}</td>
                       <td>{new Date(it.mtime).toLocaleString()}</td>
                     </tr>
