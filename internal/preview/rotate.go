@@ -48,25 +48,25 @@ func RotateOnDisk(path string, angle int) error {
 }
 
 func normalizeAngle(a int) int {
-	for a < 0 {
-		a += 360
-	}
-	switch a % 360 {
-	case 90, 270:
-		return 90
-	case 180, -180:
+	a = (a%360 + 360) % 360 // normalize to [0, 360)
+	switch a {
+	case 90:
+		return 90 // clockwise
+	case 180:
 		return 180
-	default:
-		return 0
+	case 270:
+		return 270 // counterclockwise (a.k.a -90)
 	}
+	return 0
 }
 
-// rotateImage rotates src preserving its aspect.
+// rotateImage rotates src preserving its aspect. angle is 90 (clockwise),
+// 180, or 270 (counterclockwise).
 func rotateImage(src image.Image, angle int) *image.RGBA {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
 	dw, dh := w, h
-	if angle == 90 {
+	if angle == 90 || angle == 270 {
 		dw, dh = h, w
 	}
 	out := image.NewRGBA(image.Rect(0, 0, dw, dh))
@@ -80,7 +80,7 @@ func rotateImage(src image.Image, angle int) *image.RGBA {
 				nx, ny = h-1-iy, ix
 			case 180:
 				nx, ny = w-1-ix, h-1-iy
-			default: // should not happen for a file with normalized angle
+			case 270: // counterclockwise
 				nx, ny = iy, w-1-ix
 			}
 			out.Set(nx, ny, c)
