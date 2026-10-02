@@ -10,7 +10,6 @@
 #   make fmt          gofmt the Go source, prettier-agnostic (see fmt-full)
 #   make docker       build the Docker image
 #   make up           docker compose up -d --build (root docker-compose.yaml)
-#   make restart      rebuild & recreate the stack (down + up --build)
 #   make down         docker compose stop + remove
 #   make clean        remove local build artifacts
 
@@ -27,7 +26,7 @@ BINDIR           := bin
 API_LISTEN       ?= :8290
 
 .PHONY: all build run web-dev web-build test lint fmt clean docker \
-        up restart down logs ps image
+        up down logs ps image
 
 all: build web-build        ## default: local binaries + frontend dist
 	@echo "built backend and frontend"
@@ -74,7 +73,7 @@ fmt:                      ## gofmt the Go source
 ## ---- docker / deploy ----
 
 image:                    ## build the Docker image
-	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE) -f Dockerfile .
+	docker build --network=host --build-arg VERSION=$(VERSION) -t $(IMAGE) -f Dockerfile .
 
 docker: image
 	@echo "image ready: $(IMAGE)"
@@ -82,12 +81,12 @@ docker: image
 up:                       ## build & start stack (docker-compose.yaml)
 	$(COMPOSE) up -d --build
 
+down:                     ## stop & remove stack
+	$(COMPOSE) down
+
 restart:                  ## rebuild & recreate the stack (down + up --build)
 	$(COMPOSE) down
 	$(COMPOSE) up -d --build
-
-down:                     ## stop & remove stack
-	$(COMPOSE) down
 
 logs:                     ## tail stack logs
 	$(COMPOSE) logs -f --tail=100
