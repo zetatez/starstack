@@ -5,4 +5,7 @@ docs
 web/node_modules
 web/dist
 data
+bin
+Makefile
 /tmp
+login.json

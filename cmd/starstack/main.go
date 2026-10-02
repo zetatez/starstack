@@ -16,9 +16,13 @@ import (
 	"github.com/shiyi/starstack/internal/store"
 )
 
+// version is injected at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	cfg := config.FromEnv()
 	log := newLogger(cfg.Log)
+	log.Info("starstack starting", "version", version)
 	if err := run(cfg, log); err != nil {
 		log.Error("server exited with error", "err", err)
 		os.Exit(1)

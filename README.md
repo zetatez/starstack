@@ -19,18 +19,29 @@
 ## 本地开发
 
 ```bash
-# 后端（默认 :8290，个人空间/分享目录可在环境变量指定）
-LISTEN=:8290 DATA_DIR=./data SHARE_ROOT=./share go run ./cmd/starstack
+# 常用命令（详见 make help）
+make build        # 编译后端到 bin/
+make run          # 本地启动后端（默认 :8290）
+make web-dev      # 前端 HMR（/api 代理到 :8290）
+make test         # Go 测试 + vet
 
-# 前端（vite 代理 /api → :8290，如后端端口不同改 vite.config.ts）
+# 或手动：
+# 后端
+LISTEN=:8290 DATA_DIR=./data SHARE_ROOT=./share go run ./cmd/starstack
+# 前端（vite 代理 /api → :8290）
 cd web && npm install && npm run dev
 ```
 
 ## Docker 部署
 
 ```bash
-cd deploy
-docker compose up -d --build
+make up          # = docker compose up -d --build (deploy/docker-compose.yml)
+make image       # 仅构建镜像
+make logs        # 查看日志
+make down        # 停止
+
+# 或手动：
+cd deploy && docker compose up -d --build
 # 打开 http://localhost:8290 ，首个注册用户即管理员
 ```
 
