@@ -6,7 +6,7 @@ services:
     image: starstack:latest
     container_name: starstack
     ports:
-      - "8080:80"                     # 对外 8080 → 容器 nginx :80
+      - "8290:80"                     # 对外 8290 → 容器 nginx :80
     volumes:
       - ./data:/app/data:rw          # SQLite + 个人空间 + 缓存
       - /data/cloud:/share:rw        # 宿主机目录 → 共享盘（按需调整路径）

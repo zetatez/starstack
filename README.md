@@ -19,10 +19,10 @@
 ## 本地开发
 
 ```bash
-# 后端（默认 :8080，个人空间/分享目录可在环境变量指定）
-LISTEN=:8080 DATA_DIR=./data SHARE_ROOT=./share go run ./cmd/starstack
+# 后端（默认 :8290，个人空间/分享目录可在环境变量指定）
+LISTEN=:8290 DATA_DIR=./data SHARE_ROOT=./share go run ./cmd/starstack
 
-# 前端（vite 代理 /api → :18080，如后端端口不同改 vite.config.ts）
+# 前端（vite 代理 /api → :8290，如后端端口不同改 vite.config.ts）
 cd web && npm install && npm run dev
 ```
 
@@ -31,7 +31,7 @@ cd web && npm install && npm run dev
 ```bash
 cd deploy
 docker compose up -d --build
-# 打开 http://localhost:8080 ，首个注册用户即管理员
+# 打开 http://localhost:8290 ，首个注册用户即管理员
 ```
 
 挂载说明：`docker-compose.yml` 中 `/data/cloud:/share` 即宿主机目录→共享盘，
@@ -41,7 +41,7 @@ docker compose up -d --build
 
 | 变量 | 默认 | 说明 |
 |------|------|------|
-| `LISTEN` | `:8080` | 后端监听 |
+| `LISTEN` | `:8290` | 后端监听 |
 | `DATA_DIR` | `/app/data` | SQLite、个人空间、缓存 |
 | `SHARE_ROOT` | `/share` | 共享盘挂载点 |
 | `SECRET` | 自动生成 | JWT/分享签名密钥（留空随机生成并持久化） |

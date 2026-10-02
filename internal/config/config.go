@@ -12,7 +12,7 @@ import (
 
 // Config holds the small set of tunable options for the service.
 type Config struct {
-	Listen      string // e.g. ":8080"
+	Listen      string // e.g. ":8290"
 	DataDir     string // SQLite db, per-user space and cache all live here
 	ShareRoot   string // host-mounted shared/public disk
 	Secret      string // JWT + share signing secret (auto-generated if empty)
@@ -30,7 +30,7 @@ type Log struct {
 // FromEnv builds a Config from environment variables, applying defaults.
 func FromEnv() *Config {
 	cfg := &Config{
-		Listen:      getenv("LISTEN", ":8080"),
+		Listen:      getenv("LISTEN", ":8290"),
 		DataDir:     getenv("DATA_DIR", "/app/data"),
 		ShareRoot:   getenv("SHARE_ROOT", "/share"),
 		Log:         Log{Level: getenv("LOG_LEVEL", "info"), File: getenv("LOG_FILE", "")},
