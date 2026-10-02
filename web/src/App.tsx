@@ -87,6 +87,8 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
   const [drag, setDrag] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<Item | null>(null);
+  const [view, setView] = useState<'list' | 'grid'>('list');
+  const [showHidden, setShowHidden] = useState(false);
 
   const load = useCallback(async (sc: Scope, dir: string) => {
     setLoading(true); setError('');
@@ -127,7 +129,9 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
   const openItem = (it: Item) => { if (it.is_dir) go(it.full); else setPreview(it); };
 
   const canPreview = (n: string) => PREVIEW_IMAGE.test(n) || PREVIEW_VIDEO.test(n) || PREVIEW_AUDIO.test(n) || PREVIEW_PDF.test(n) || PREVIEW_TEXT.test(n);
+  const isImage = (n: string) => PREVIEW_IMAGE.test(n);
   const trail = cwd.split('/').filter(Boolean);
+  const visible = showHidden ? items : items.filter((it) => !it.name.startsWith('.'));
 
   return (
     <div className="sheet">
@@ -156,24 +160,61 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
             <button className="ghost" onClick={refresh}>↻ 刷新</button>
             <input ref={fileRef} type="file" multiple hidden
               onChange={(e) => { if (e.target.files) void doUpload(Array.from(e.target.files)); e.target.value = ''; }} />
-            <div className="path">
-              <button className="link" onClick={() => go('/')}>/</button>
-              {trail.map((seg, i) => <span key={i}>
-                <button className="link" onClick={() => go('/' + trail.slice(0, i + 1).join('/'))}>{seg}</button>
-              </span>)}
+            <div className="spacer" />
+            <button className={`ghost toggle${showHidden ? ' on' : ''}`} title="显示/隐藏以 . 开头的文件"
+              onClick={() => setShowHidden((v) => !v)}>
+              <span className="hidden-ico">{showHidden ? '◉' : '◎'}</span> 隐藏文件
+            </button>
+            <div className="view-toggle">
+              <button className={view === 'list' ? 'on' : ''} title="列表视图" onClick={() => setView('list')}>☰ 列表</button>
+              <button className={view === 'grid' ? 'on' : ''} title="网格视图" onClick={() => setView('grid')}>▦ 网格</button>
             </div>
+          </div>
+          <div className="pathbar">
+            <span className="path-scope">{scope === 'me' ? '我的空间' : '共享盘'}</span>
+            <span className="sep">/</span>
+            <button className="link" onClick={() => go('/')} title="根目录">根</button>
+            {trail.map((seg, i) => (
+              <span key={i}>
+                <span className="sep">/</span>
+                <button className="link" onClick={() => go('/' + trail.slice(0, i + 1).join('/'))}>{seg}</button>
+              </span>
+            ))}
           </div>
           {error && <div className="banner err">{error}</div>}
           <div className={`body${drag ? ' drag' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
             onDragLeave={() => setDrag(false)}
             onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files) void doUpload(Array.from(e.dataTransfer.files)); }}>
-            {loading ? <p className="muted pad">加载中…</p> : items.length === 0 ? <p className="muted pad">空目录 — 拖拽文件到此处上传</p> : (
+            {loading ? <p className="muted pad">加载中…</p> : visible.length === 0 ? <p className="muted pad">空目录 — 拖拽文件到此处上传{items.length ? '（隐藏文件已过滤，点“隐藏文件”可显示）' : ''}</p> : view === 'grid' ? (
+              <div className="grid">
+                {visible.map((it) => (
+                  <div key={it.full} className={`gcard${it.name.startsWith('.') ? ' ghidden' : ''}`} onClick={() => openItem(it)}>
+                    <div className="gthumb">
+                      {it.is_dir ? <span className="gico folder">📁</span>
+                        : isImage(it.name) ? <img className="gimg" src={api.preview.thumbURL(scope, it.full, 256)} loading="lazy" alt={it.name} />
+                        : <span className="gico file">📄</span>}
+                    </div>
+                    <div className="gname" title={it.full}>{it.name}</div>
+                    <div className="gmeta">{it.is_dir ? '文件夹' : fmtSize(it.size)}</div>
+                    <div className="gactions">
+                      {!it.is_dir && <>
+                        {canPreview(it.name) && <button className="ghost sm" onClick={(e) => { e.stopPropagation(); setPreview(it); }}>预览</button>}
+                        <button className="ghost sm" onClick={(e) => { e.stopPropagation(); void api.downloadBlob(scope, it.full, it.name).catch(() => setError('下载失败')); }}>下载</button>
+                      </>}
+                      <button className="ghost sm" onClick={(e) => { e.stopPropagation(); void rename(it); }}>重命名</button>
+                      <button className="ghost sm" onClick={(e) => { e.stopPropagation(); void move(it); }}>移动</button>
+                      <button className="ghost sm danger" onClick={(e) => { e.stopPropagation(); void del(it); }}>删除</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
               <table className="list">
                 <thead><tr><th>名称</th><th>大小</th><th>修改时间</th><th>操作</th></tr></thead>
                 <tbody>
-                  {items.map((it) => (
-                    <tr key={it.full} onDoubleClick={() => openItem(it)}>
+                  {visible.map((it) => (
+                    <tr key={it.full} className={it.name.startsWith('.') ? 'ghidden' : ''} onDoubleClick={() => openItem(it)}>
                       <td>
                         {it.is_dir ? '📁' : '📄'}
                         <button className="link" onClick={() => openItem(it)}>{it.name}</button>
