@@ -307,7 +307,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
                   {visible.map((it) => (
                     <tr key={it.full}
                         className={`${it.name.startsWith('.') ? 'ghidden ' : ''}${sel.has(it.full) ? 'sel' : ''}`}
-                        onClick={() => openItem(it)} onContextMenu={(e) => openMenu(e, it)}>
+                        onClick={() => toggleSel(it.full)} onDoubleClick={() => openItem(it)} onContextMenu={(e) => openMenu(e, it)}>
                       <td className="chk" onClick={(e) => e.stopPropagation()}>
                         <input className="row-chk" type="checkbox" checked={sel.has(it.full)} onChange={() => toggleSel(it.full)} onClick={(e) => e.stopPropagation()} />
                       </td>
@@ -389,7 +389,7 @@ function GridBulk(props: {
         return (
           <div key={it.full} style={style}
             className={`gcard${it.name.startsWith('.') ? ' ghidden' : ''}${sel.has(it.full) ? ' gcsel' : ''}`}
-            onClick={() => onOpen(it)} onContextMenu={(e) => onMenu(e, it)}>
+            onClick={() => onToggle(it.full)} onDoubleClick={() => onOpen(it)} onContextMenu={(e) => onMenu(e, it)}>
             <span className="gcheck" onClick={(e) => { e.stopPropagation(); onToggle(it.full); }}>
               <input type="checkbox" checked={sel.has(it.full)} onChange={() => onToggle(it.full)} />
             </span>
