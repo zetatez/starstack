@@ -78,6 +78,21 @@ select { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
 .list tbody tr.nav-row { cursor: pointer; background: rgba(76,141,255,0.04); }
 .list tbody tr.nav-row:hover { background: rgba(76,141,255,0.10); }
 
+/* virtualized list */
+.vlist-head, .vlist-row { display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid var(--border); }
+.vlist-head { color: var(--muted); font-weight: 500; position: sticky; top: 0; z-index: 3; background: var(--panel); height: 36px; }
+.vlist-window { position: relative; }
+.vlist-row { position: absolute; left: 0; right: 0; cursor: pointer; }
+.vlist-row:hover { background: rgba(255,255,255,0.03); }
+.vlist-row.sel { background: rgba(76,141,255,0.10); }
+.vlist-row.nav { background: rgba(76,141,255,0.04); }
+.vlist-row.nav:hover { background: rgba(76,141,255,0.10); }
+.vchk { width: 40px; flex: none; text-align: center; display: flex; align-items: center; justify-content: flex-start; gap: 4px; }
+.vname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vname .type { margin-right: 6px; opacity: 0.85; }
+.vsize { width: 90px; flex: none; color: var(--muted); }
+.vtime { width: 180px; flex: none; color: var(--muted); font-size: 12px; }
+
 /* grid view */
 .grid-v { position: relative; }
 .grid-v .gcard { position: absolute; top: 0; left: 0; }

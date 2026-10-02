@@ -325,43 +325,11 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
               top={vw.top} height={vw.height}
               scope={scope} sel={sel} isImage={isImage}
               onToggle={toggleSel} onOpen={openItem} onMenu={openMenu} onNav={go} /> : (
-              <table className="list">
-                <thead><tr>
-                  <th className="chk"><input type="checkbox" title="全选/取消" checked={allSel} onChange={toggleAll} /></th>
-                  <th>名称</th><th>大小</th><th>修改时间</th>
-                </tr></thead>
-                <tbody>
-                  {showUp2 && (
-                    <tr className="nav-row" onClick={() => go(grandPath)}>
-                      <td className="chk"></td>
-                      <td>📁 <button className="link" onClick={(e) => { e.stopPropagation(); go(grandPath); }}>...</button></td>
-                      <td>—</td><td></td>
-                    </tr>
-                  )}
-                  {showUp && (
-                    <tr className="nav-row" onClick={() => go(parentPath)}>
-                      <td className="chk"></td>
-                      <td>📁 <button className="link" onClick={(e) => { e.stopPropagation(); go(parentPath); }}>..</button></td>
-                      <td>—</td><td></td>
-                    </tr>
-                  )}
-                  {visible.map((it) => (
-                    <tr key={it.full}
-                        className={`${it.name.startsWith('.') ? 'ghidden ' : ''}${sel.has(it.full) ? 'sel' : ''}`}
-                        onClick={() => openItem(it)} onContextMenu={(e) => openMenu(e, it)}>
-                      <td className="chk" onClick={(e) => { e.stopPropagation(); toggleSel(it.full); }} title="点击选择/取消选择">
-                        <input className="row-chk" type="checkbox" checked={sel.has(it.full)} onChange={() => toggleSel(it.full)} onClick={(e) => e.stopPropagation()} />
-                      </td>
-                      <td className="namecell" onClick={(e) => e.stopPropagation()}>
-                        <span className="type">{it.is_dir ? '📁' : '📄'}</span>
-                        <button className="link" onClick={(e) => { e.stopPropagation(); openItem(it); }}>{it.name}</button>
-                      </td>
-                      <td>{it.is_dir ? '—' : fmtSize(it.size)}</td>
-                      <td>{new Date(it.mtime).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <ListBulk
+                items={visible} nav={nav} top={vw.top} height={vw.height}
+                scope={scope} sel={sel}
+                selectAll={allSel} onSelectAll={toggleAll}
+                onToggle={toggleSel} onOpen={openItem} onMenu={openMenu} onNav={go} />
             )}
           </div>
         </>
@@ -402,6 +370,63 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
 }
 
 const CARD_W = 172, GAP = 14, ROW_H = 196;
+const ROW_LIST = 41;
+
+/** Virtualized list: only mounts rows inside the viewport (+overscan). */
+function ListBulk(props: {
+  items: Item[]; nav: { key: string; label: string; title: string; go: string }[];
+  top: number; height: number; scope: Scope; sel: Set<string>;
+  selectAll: boolean; onSelectAll: () => void;
+  onToggle: (full: string) => void; onOpen: (it: Item) => void;
+  onMenu: (e: React.MouseEvent, it: Item) => void; onNav: (dir: string) => void;
+}) {
+  const { items, nav, top, height, sel, selectAll, onSelectAll, onToggle, onOpen, onMenu, onNav } = props;
+  const total = nav.length + items.length;
+  const startIdx = Math.max(0, Math.floor((top - ROW_LIST) / ROW_LIST));
+  const endIdx = Math.min(total, Math.ceil((top + height + ROW_LIST) / ROW_LIST));
+  const rows: number[] = [];
+  for (let i = startIdx; i < endIdx; i++) rows.push(i);
+
+  return (
+    <div className="vlist">
+      <div className="vlist-head">
+        <div className="vchk" onClick={() => onSelectAll()}><input type="checkbox" title="全选/取消" checked={selectAll} onChange={onSelectAll} /></div>
+        <div className="vname">名称</div><div className="vsize">大小</div><div className="vtime">修改时间</div>
+      </div>
+      <div className="vlist-window" style={{ height: total * ROW_LIST + 6 }}>
+        {rows.map((i) => {
+          const style: React.CSSProperties = { top: i * ROW_LIST, height: ROW_LIST };
+          if (i < nav.length) {
+            const n = nav[i];
+            return (
+              <div key={`nav-${n.key}`} className="vlist-row nav" style={style} onClick={() => onNav(n.go)} title={n.title}>
+                <div className="vchk">📁</div>
+                <div className="vname"><button className="link">{n.label}</button></div>
+                <div className="vsize">—</div><div className="vtime"></div>
+              </div>
+            );
+          }
+          const it = items[i - nav.length];
+          return (
+            <div key={it.full} style={style}
+              className={`vlist-row${it.name.startsWith('.') ? ' ghidden' : ''}${sel.has(it.full) ? ' sel' : ''}`}
+              onClick={() => onOpen(it)} onContextMenu={(e) => onMenu(e, it)}>
+              <div className="vchk" onClick={(e) => { e.stopPropagation(); onToggle(it.full); }} title="点击选择/取消选择">
+                <input type="checkbox" checked={sel.has(it.full)} onChange={() => onToggle(it.full)} onClick={(e) => e.stopPropagation()} />
+              </div>
+              <div className="vname">
+                <span className="type">{it.is_dir ? '📁' : '📄'}</span>
+                <button className="link" onClick={(e) => { e.stopPropagation(); onOpen(it); }}>{it.name}</button>
+              </div>
+              <div className="vsize">{it.is_dir ? '—' : fmtSize(it.size)}</div>
+              <div className="vtime">{new Date(it.mtime).toLocaleString()}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 /** Virtualized grid: only renders cells within the viewport (+overscan). */
 function GridBulk(props: {
@@ -413,8 +438,9 @@ function GridBulk(props: {
 }) {
   const { items, nav, cols, top, height, scope, sel, isImage, onToggle, onOpen, onMenu, onNav } = props;
   const totCells = nav.length + items.length;
-  const startIdx = Math.max(0, Math.floor((top - ROW_H) / ROW_H) * cols);   // one row overscan
-  const endIdx = Math.min(totCells, Math.ceil((top + height + ROW_H) / ROW_H) * cols);
+  const overscanRows = 2; // prefetch ahead while idle
+  const startIdx = Math.max(0, Math.floor((top - overscanRows*ROW_H) / ROW_H) * cols);
+  const endIdx = Math.min(totCells, Math.ceil((top + height + overscanRows*ROW_H) / ROW_H) * cols);
   const rows = Math.ceil(totCells / cols);
   const cells: number[] = [];
   for (let i = startIdx; i < endIdx; i++) cells.push(i);

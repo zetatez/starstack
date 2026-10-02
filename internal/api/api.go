@@ -57,7 +57,7 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger) (*Server, error)
 	if err != nil {
 		return nil, fmt.Errorf("trash init: %w", err)
 	}
-	pv, err := preview.New(preview.Options{CacheDir: filepath.Join(cfg.DataDir, "cache"), MemoryEntries: 512})
+	pv, err := preview.New(preview.Options{CacheDir: filepath.Join(cfg.DataDir, "cache"), MemoryEntries: 2048})
 	if err != nil {
 		return nil, fmt.Errorf("preview init: %w", err)
 	}
