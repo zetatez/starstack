@@ -228,8 +228,9 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
               <span className="hidden-ico">{showHidden ? '◉' : '◎'}</span> 隐藏文件
             </button>
             <div className="view-toggle">
-              <button className={view === 'list' ? 'on' : ''} title="列表视图" onClick={() => setView('list')}>☰</button>
-              <button className={view === 'grid' ? 'on' : ''} title="网格视图" onClick={() => setView('grid')}>▦</button>
+              {view === 'list'
+                ? <button title="切换到网格视图" onClick={() => setView('grid')}>▦</button>
+                : <button title="切换到列表视图" onClick={() => setView('list')}>☰</button>}
             </div>
           </div>
           {sel.size > 0 && (
