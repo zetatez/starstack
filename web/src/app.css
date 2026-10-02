@@ -71,6 +71,13 @@ select { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
 .hidden-ico { font-size: 12px; }
 .ghidden { opacity: 0.55; }
 
+/* up-navigation */
+.gcard.gnav { border-style: dashed; cursor: pointer; }
+.gcard.gnav:hover { border-color: var(--accent); background: rgba(76,141,255,0.06); }
+.gcard.gnav .gthumb .gicon-up { font-size: 30px; color: var(--accent); }
+.list tbody tr.nav-row { cursor: pointer; background: rgba(76,141,255,0.04); }
+.list tbody tr.nav-row:hover { background: rgba(76,141,255,0.10); }
+
 /* grid view */
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; padding: 14px; }
 .gcard { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; cursor: pointer; display: flex; flex-direction: column; transition: border-color .15s; }

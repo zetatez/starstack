@@ -132,6 +132,10 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
   const isImage = (n: string) => PREVIEW_IMAGE.test(n);
   const trail = cwd.split('/').filter(Boolean);
   const visible = showHidden ? items : items.filter((it) => !it.name.startsWith('.'));
+  const parentPath = upPath(cwd, 1);
+  const grandPath = upPath(cwd, 2);
+  const showUp = parentPath !== cwd;
+  const showUp2 = parentPath !== cwd && grandPath !== parentPath;
 
   return (
     <div className="sheet">
@@ -188,6 +192,18 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
             onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files) void doUpload(Array.from(e.dataTransfer.files)); }}>
             {loading ? <p className="muted pad">加载中…</p> : visible.length === 0 ? <p className="muted pad">空目录 — 拖拽文件到此处上传{items.length ? '（隐藏文件已过滤，点“隐藏文件”可显示）' : ''}</p> : view === 'grid' ? (
               <div className="grid">
+                {showUp && (
+                  <div className="gcard gnav" title="上一级" onClick={() => go(parentPath)}>
+                    <div className="gthumb"><span className="gicon-up">↩</span></div>
+                    <div className="gname">..</div><div className="gmeta">上一级</div>
+                  </div>
+                )}
+                {showUp2 && (
+                  <div className="gcard gnav" title="上两级" onClick={() => go(grandPath)}>
+                    <div className="gthumb"><span className="gicon-up">↪</span></div>
+                    <div className="gname">...</div><div className="gmeta">上两级</div>
+                  </div>
+                )}
                 {visible.map((it) => (
                   <div key={it.full} className={`gcard${it.name.startsWith('.') ? ' ghidden' : ''}`} onClick={() => openItem(it)}>
                     <div className="gthumb">
@@ -213,6 +229,18 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
               <table className="list">
                 <thead><tr><th>名称</th><th>大小</th><th>修改时间</th><th>操作</th></tr></thead>
                 <tbody>
+                  {showUp && (
+                    <tr className="nav-row" onClick={() => go(parentPath)}>
+                      <td>📁 <button className="link" onClick={(e) => { e.stopPropagation(); go(parentPath); }}>..</button></td>
+                      <td>—</td><td>上一级</td><td></td>
+                    </tr>
+                  )}
+                  {showUp2 && (
+                    <tr className="nav-row" onClick={() => go(grandPath)}>
+                      <td>📁 <button className="link" onClick={(e) => { e.stopPropagation(); go(grandPath); }}>...</button></td>
+                      <td>—</td><td>上两级</td><td></td>
+                    </tr>
+                  )}
                   {visible.map((it) => (
                     <tr key={it.full} className={it.name.startsWith('.') ? 'ghidden' : ''} onDoubleClick={() => openItem(it)}>
                       <td>
@@ -435,6 +463,13 @@ function PreviewModal({ item, scope, onClose }: { item: Item; scope: Scope; onCl
 function joinDir(dir: string, name: string): string {
   const d = dir === '/' ? '' : dir;
   return `${d}/${name}`;
+}
+
+/** Return the path `levels` directories above `dir` (clamped at '/'). */
+function upPath(dir: string, levels: number): string {
+  const parts = dir.split('/').filter(Boolean);
+  const kept = parts.slice(0, Math.max(0, parts.length - levels));
+  return '/' + kept.join('/');
 }
 
 function fmtSize(n: number): string {
