@@ -32,7 +32,7 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 # create as root-owned) are writable out of the box. For a private host this
 # is the pragmatic default; re-harden with a non-root user if you pin host
 # dir ownership accordingly.
-RUN mkdir -p /app/data /share && chmod +x /usr/local/bin/entrypoint.sh
+RUN mkdir -p /app/data /share /tmp/nginx && chmod +x /usr/local/bin/entrypoint.sh
 
 # Internal API listen port (nginx reverse-proxies to this). Overridable by env.
 ENV LISTEN=:8080 \
