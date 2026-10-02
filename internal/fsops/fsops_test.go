@@ -107,6 +107,29 @@ func TestListMkdirRenameMoveDelete(t *testing.T) {
 	}
 }
 
+func TestCopy(t *testing.T) {
+	m := newTestMgr(t)
+	_ = m.Mkdir("/docs")
+	_ = os.WriteFile(filepath.Join(m.Root, "docs", "a.txt"), []byte("hi"), 0o644)
+	_ = m.Mkdir("/src")
+	_ = os.WriteFile(filepath.Join(m.Root, "src", "b.txt"), []byte("b"), 0o644)
+
+	if err := m.Copy("/src", "/docs"); err != nil {
+		t.Fatalf("copy: %v", err)
+	}
+	if b, err := os.ReadFile(filepath.Join(m.Root, "docs", "src", "b.txt")); err != nil || string(b) != "b" {
+		t.Fatalf("copied nested file: %v %q", err, b)
+	}
+	// Collision with existing name must fail.
+	if err := m.Copy("/src", "/docs"); err == nil {
+		t.Error("copying onto existing destination should fail")
+	}
+	// Copying a dir into itself must fail.
+	if err := m.Copy("/docs", "/docs/src"); err == nil {
+		t.Error("copying into itself should fail")
+	}
+}
+
 func TestRenameRejectsSeparators(t *testing.T) {
 	m := newTestMgr(t)
 	_ = m.Mkdir("/docs")

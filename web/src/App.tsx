@@ -89,6 +89,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
   const [preview, setPreview] = useState<Item | null>(null);
   const [view, setView] = useState<'list' | 'grid'>('list');
   const [showHidden, setShowHidden] = useState(false);
+  const [sel, setSel] = useState<Set<string>>(new Set());
 
   const load = useCallback(async (sc: Scope, dir: string) => {
     setLoading(true); setError('');
@@ -98,7 +99,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
 
   useEffect(() => { if (tab === 'files') void load(scope, cwd); }, [scope, cwd, tab, load]);
 
-  const go = (dir: string) => { setCwd(dir); };
+  const go = (dir: string) => { setCwd(dir); setSel(new Set()); };
   const refresh = () => void load(scope, cwd);
 
   const doUpload = async (files: File[]) => {
@@ -126,6 +127,11 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
     if (!confirm(`删除 ${it.name} ？（进入回收站，可恢复）`)) return;
     try { await api.remove(scope, it.full); refresh(); } catch (ex) { setError((ex as Error).message); }
   };
+  const copyOne = async (it: Item) => {
+    const dest = prompt(`复制 ${it.name} 到目录（绝对路径）`, '/');
+    if (!dest) return;
+    try { await api.copy(scope, it.full, dest); refresh(); } catch (ex) { setError((ex as Error).message); }
+  };
   const openItem = (it: Item) => { if (it.is_dir) go(it.full); else setPreview(it); };
 
   const canPreview = (n: string) => PREVIEW_IMAGE.test(n) || PREVIEW_VIDEO.test(n) || PREVIEW_AUDIO.test(n) || PREVIEW_PDF.test(n) || PREVIEW_TEXT.test(n);
@@ -137,13 +143,52 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
   const showUp = parentPath !== cwd;
   const showUp2 = parentPath !== cwd && grandPath !== parentPath;
 
+  // ---- multi-select ----
+  const toggleSel = (full: string) => setSel((prev) => {
+    const n = new Set(prev); n.has(full) ? n.delete(full) : n.add(full); return n;
+  });
+  const allSel = (parentPath !== cwd || visible.length > 0) && visible.length > 0 && visible.every((it) => sel.has(it.full));
+  const toggleAll = () => setSel(allSel ? new Set() : new Set(visible.map((it) => it.full)));
+  const clearSel = () => setSel(new Set());
+
+  const batch = {
+    download: async () => {
+      if (!sel.size) return;
+      try { await api.zipDownload(scope, [...sel]); clearSel(); }
+      catch (e) { setError((e as Error).message); }
+    },
+    copy: async () => {
+      if (!sel.size) return;
+      const dest = prompt(`复制选中的 ${sel.size} 项到目录（绝对路径）`, '/');
+      if (!dest) return;
+      setError('');
+      for (const p of sel) { try { await api.copy(scope, p, dest); } catch (e) { setError((e as Error).message); } }
+      clearSel(); refresh();
+    },
+    move: async () => {
+      if (!sel.size) return;
+      const dest = prompt(`移动选中的 ${sel.size} 项到目录（绝对路径）`, '/');
+      if (!dest) return;
+      setError('');
+      for (const p of sel) { try { await api.move(scope, p, dest); } catch (e) { setError((e as Error).message); } }
+      clearSel(); refresh();
+    },
+    del: async () => {
+      if (!sel.size) return;
+      if (!confirm(`删除选中的 ${sel.size} 项？（进回收站）`)) return;
+      setError('');
+      for (const p of sel) { try { await api.remove(scope, p); } catch (e) { setError((e as Error).message); } }
+      clearSel(); refresh();
+    },
+  };
+
   return (
     <div className="sheet">
       <header className="topbar">
         <div className="brand">StarStack</div>
         <div className="scopes">
-          <button className={tab === 'files' && scope === 'me' ? 'on' : ''} onClick={() => { setTab('files'); setScope('me'); setCwd('/'); }}>我的空间</button>
-          <button className={tab === 'files' && scope === 'share' ? 'on' : ''} onClick={() => { setTab('files'); setScope('share'); setCwd('/'); }}>共享盘</button>
+          <button className={tab === 'files' && scope === 'me' ? 'on' : ''} onClick={() => { setTab('files'); setScope('me'); setCwd('/'); setSel(new Set()); }}>我的空间</button>
+          <button className={tab === 'files' && scope === 'share' ? 'on' : ''} onClick={() => { setTab('files'); setScope('share'); setCwd('/'); setSel(new Set()); }}>共享盘</button>
         </div>
         <nav className="tabs">
           <button className={tab === 'files' ? 'on' : ''} onClick={() => setTab('files')}>文件</button>
@@ -159,9 +204,9 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
       {tab === 'files' && (
         <>
           <div className="toolbar">
-            <button className="ghost" onClick={() => fileRef.current?.click()}>⬆ 上传</button>
-            <button className="ghost" onClick={mkdir}>＋ 新建文件夹</button>
-            <button className="ghost" onClick={refresh}>↻ 刷新</button>
+            <button className="ghost ico" title="上传" onClick={() => fileRef.current?.click()}>⬆</button>
+            <button className="ghost ico" title="新建文件夹" onClick={mkdir}>＋</button>
+            <button className="ghost ico" title="刷新" onClick={refresh}>↻</button>
             <input ref={fileRef} type="file" multiple hidden
               onChange={(e) => { if (e.target.files) void doUpload(Array.from(e.target.files)); e.target.value = ''; }} />
             <div className="spacer" />
@@ -170,10 +215,20 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
               <span className="hidden-ico">{showHidden ? '◉' : '◎'}</span> 隐藏文件
             </button>
             <div className="view-toggle">
-              <button className={view === 'list' ? 'on' : ''} title="列表视图" onClick={() => setView('list')}>☰ 列表</button>
-              <button className={view === 'grid' ? 'on' : ''} title="网格视图" onClick={() => setView('grid')}>▦ 网格</button>
+              <button className={view === 'list' ? 'on' : ''} title="列表视图" onClick={() => setView('list')}>☰</button>
+              <button className={view === 'grid' ? 'on' : ''} title="网格视图" onClick={() => setView('grid')}>▦</button>
             </div>
           </div>
+          {sel.size > 0 && (
+            <div className="batchbar">
+              <span className="batch-count">已选 {sel.size} 项</span>
+              <button className="ghost ico" title="打包下载(选中)" onClick={() => void batch.download()}>⬇</button>
+              <button className="ghost ico" title="复制到…" onClick={() => void batch.copy()}>📋</button>
+              <button className="ghost ico" title="移动到…" onClick={() => void batch.move()}>➜</button>
+              <button className="ghost ico" title="删除选中" onClick={() => void batch.del()}>🗑</button>
+              <button className="ghost" onClick={clearSel}>取消选择 ✕</button>
+            </div>
+          )}
           <div className="pathbar">
             <span className="path-scope">{scope === 'me' ? '我的空间' : '共享盘'}</span>
             <span className="sep">/</span>
@@ -205,7 +260,11 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
                   </div>
                 )}
                 {visible.map((it) => (
-                  <div key={it.full} className={`gcard${it.name.startsWith('.') ? ' ghidden' : ''}`} onClick={() => openItem(it)}>
+                  <div key={it.full} className={`gcard${it.name.startsWith('.') ? ' ghidden' : ''}${sel.has(it.full) ? ' gcsel' : ''}`}
+                    onClick={() => toggleSel(it.full)} onDoubleClick={() => openItem(it)}>
+                    <span className="gcheck" onClick={(e) => { e.stopPropagation(); toggleSel(it.full); }}>
+                      <input type="checkbox" checked={sel.has(it.full)} onChange={() => toggleSel(it.full)} />
+                    </span>
                     <div className="gthumb">
                       {it.is_dir ? <span className="gico folder">📁</span>
                         : isImage(it.name) ? <img className="gimg" src={api.preview.thumbURL(scope, it.full, 256)} loading="lazy" alt={it.name} />
@@ -215,48 +274,58 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
                     <div className="gmeta">{it.is_dir ? '文件夹' : fmtSize(it.size)}</div>
                     <div className="gactions">
                       {!it.is_dir && <>
-                        {canPreview(it.name) && <button className="ghost sm" onClick={(e) => { e.stopPropagation(); setPreview(it); }}>预览</button>}
-                        <button className="ghost sm" onClick={(e) => { e.stopPropagation(); void api.downloadBlob(scope, it.full, it.name).catch(() => setError('下载失败')); }}>下载</button>
+                        {canPreview(it.name) && <button title="预览" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); setPreview(it); }}>👁</button>}
+                        <button title="下载" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void api.downloadBlob(scope, it.full, it.name).catch(() => setError('下载失败')); }}>⬇</button>
                       </>}
-                      <button className="ghost sm" onClick={(e) => { e.stopPropagation(); void rename(it); }}>重命名</button>
-                      <button className="ghost sm" onClick={(e) => { e.stopPropagation(); void move(it); }}>移动</button>
-                      <button className="ghost sm danger" onClick={(e) => { e.stopPropagation(); void del(it); }}>删除</button>
+                      <button title="复制" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void copyOne(it); }}>📋</button>
+                      <button title="重命名" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void rename(it); }}>✏️</button>
+                      <button title="移动" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void move(it); }}>➜</button>
+                      <button title="删除" className="ghost sm ico danger" onClick={(e) => { e.stopPropagation(); void del(it); }}>🗑</button>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
               <table className="list">
-                <thead><tr><th>名称</th><th>大小</th><th>修改时间</th><th>操作</th></tr></thead>
+                <thead><tr>
+                  <th className="chk"><input type="checkbox" title="全选/取消" checked={allSel} onChange={toggleAll} /></th>
+                  <th>名称</th><th>大小</th><th>修改时间</th><th>操作</th>
+                </tr></thead>
                 <tbody>
                   {showUp && (
                     <tr className="nav-row" onClick={() => go(parentPath)}>
+                      <td className="chk"></td>
                       <td>📁 <button className="link" onClick={(e) => { e.stopPropagation(); go(parentPath); }}>..</button></td>
                       <td>—</td><td>上一级</td><td></td>
                     </tr>
                   )}
                   {showUp2 && (
                     <tr className="nav-row" onClick={() => go(grandPath)}>
+                      <td className="chk"></td>
                       <td>📁 <button className="link" onClick={(e) => { e.stopPropagation(); go(grandPath); }}>...</button></td>
                       <td>—</td><td>上两级</td><td></td>
                     </tr>
                   )}
                   {visible.map((it) => (
-                    <tr key={it.full} className={it.name.startsWith('.') ? 'ghidden' : ''} onDoubleClick={() => openItem(it)}>
-                      <td>
+                    <tr key={it.full}
+                        className={`${it.name.startsWith('.') ? 'ghidden ' : ''}${sel.has(it.full) ? 'sel' : ''}`}
+                        onClick={() => toggleSel(it.full)} onDoubleClick={() => openItem(it)}>
+                      <td className="chk">
                         {it.is_dir ? '📁' : '📄'}
-                        <button className="link" onClick={() => openItem(it)}>{it.name}</button>
+                        <input className="row-chk" type="checkbox" checked={sel.has(it.full)} onChange={() => toggleSel(it.full)} onClick={(e) => e.stopPropagation()} />
                       </td>
+                      <td><button className="link" onClick={(e) => { e.stopPropagation(); openItem(it); }}>{it.name}</button></td>
                       <td>{it.is_dir ? '—' : fmtSize(it.size)}</td>
                       <td>{new Date(it.mtime).toLocaleString()}</td>
                       <td className="actions">
                         {!it.is_dir && <>
-                          {canPreview(it.name) && <button className="ghost sm" onClick={() => setPreview(it)}>预览</button>}
-                          <button className="ghost sm" onClick={() => void api.downloadBlob(scope, it.full, it.name).catch(() => setError('下载失败'))}>下载</button>
+                          {canPreview(it.name) && <button title="预览" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); setPreview(it); }}>👁</button>}
+                          <button title="下载" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void api.downloadBlob(scope, it.full, it.name).catch(() => setError('下载失败')); }}>⬇</button>
                         </>}
-                        <button className="ghost sm" onClick={() => void rename(it)}>重命名</button>
-                        <button className="ghost sm" onClick={() => void move(it)}>移动</button>
-                        <button className="ghost sm danger" onClick={() => void del(it)}>删除</button>
+                        <button title="复制" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void copyOne(it); }}>📋</button>
+                        <button title="重命名" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void rename(it); }}>✏️</button>
+                        <button title="移动" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void move(it); }}>➜</button>
+                        <button title="删除" className="ghost sm ico danger" onClick={(e) => { e.stopPropagation(); void del(it); }}>🗑</button>
                       </td>
                     </tr>
                   ))}

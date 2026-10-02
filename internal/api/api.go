@@ -2,6 +2,7 @@
 package api
 
 import (
+	"archive/zip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -98,9 +100,11 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/fs/mkdir", s.handleMkdir)
 			r.Post("/fs/rename", s.handleRename)
 			r.Post("/fs/move", s.handleMove)
+			r.Post("/fs/copy", s.handleCopy)
 			r.Post("/fs/delete", s.handleDelete)
 			r.Post("/fs/upload", s.handleUpload)
 			r.Get("/fs/download", s.handleDownload)
+			r.Get("/fs/zip", s.handleZip)
 
 			r.Get("/trash/list", s.handleTrashList)
 			r.Post("/trash/restore", s.handleTrashRestore)
@@ -633,6 +637,133 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		result = append(result, map[string]any{"name": fh.Filename, "size": n, "ok": true})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"uploaded": result})
+}
+
+// handleCopy duplicates a path into a target directory.
+func (s *Server) handleCopy(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Scope     string `json:"scope"`
+		Path      string `json:"path"`
+		NewParent string `json:"new_parent"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if req.Scope == "" {
+		req.Scope = "me"
+	}
+	mgr, err := s.mgrFor(req.Scope)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := mgr.Copy(req.Path, req.NewParent); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleZip streams a zip archive of the requested paths (multi-select download).
+// Accepts repeated ?path= query params plus ?scope=.
+func (s *Server) handleZip(w http.ResponseWriter, r *http.Request) {
+	scope := r.URL.Query().Get("scope")
+	if scope == "" {
+		scope = "me"
+	}
+	paths := r.URL.Query()["path"]
+	if len(paths) == 0 {
+		writeErr(w, http.StatusBadRequest, "no paths")
+		return
+	}
+	mgr, err := s.mgrFor(scope)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Resolve all requested paths first; abort on any invalid one.
+	absSet := make([]string, 0, len(paths))
+	for _, p := range paths {
+		abs, err := mgr.Resolve(p)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid path")
+			return
+		}
+		if err := mustExist(abs); err != nil {
+			writeErr(w, http.StatusNotFound, "path not found")
+			return
+		}
+		absSet = append(absSet, abs)
+	}
+
+	// Choose a zip filename from the current directory name.
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="starstack.zip"`)
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+	for _, abs := range absSet {
+		if err := addZipEntry(zw, abs, filepath.Base(abs)); err != nil {
+			s.log.Warn("zip entry failed", "path", abs, "err", err)
+		}
+	}
+}
+
+// addZipEntry writes a file or directory tree into the zip archive under `name`.
+func addZipEntry(zw *zip.Writer, root, name string) error {
+	fi, err := os.Stat(root)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return addZipFile(zw, root, name, fi)
+	}
+	return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, p)
+		arc := name
+		if rel != "." {
+			arc = filepath.ToSlash(filepath.Join(name, rel))
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			_, err = zw.Create(arc + "/")
+			return err
+		}
+		return addZipFile(zw, p, arc, info)
+	})
+}
+
+func addZipFile(zw *zip.Writer, src, arc string, fi fs.FileInfo) error {
+	hdr, err := zip.FileInfoHeader(fi)
+	if err != nil {
+		return err
+	}
+	hdr.Name = arc
+	hdr.Method = zip.Deflate
+	w, err := zw.CreateHeader(hdr)
+	if err != nil {
+		return err
+	}
+	f, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = io.Copy(w, f)
+	return err
+}
+
+// mustExist reports whether an absolute path exists.
+func mustExist(abs string) error {
+	_, err := os.Stat(abs)
+	return err
 }
 
 // handleDownload serves a file with Range support for resume + streaming video.

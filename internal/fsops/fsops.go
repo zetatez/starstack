@@ -4,6 +4,7 @@ package fsops
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -175,6 +176,78 @@ func (m *Manager) Move(virtual, newParent string) error {
 		return fmt.Errorf("%w: destination exists", ErrExist)
 	}
 	return os.Rename(abs, dst)
+}
+
+// Copy duplicates a file or directory tree into an existing parent directory.
+func (m *Manager) Copy(virtual, newParent string) error {
+	abs, err := m.Resolve(virtual)
+	if err != nil {
+		return err
+	}
+	if err := mustExist(abs); err != nil {
+		return err
+	}
+	absParent, err := m.Resolve(newParent)
+	if err != nil {
+		return err
+	}
+	fi, err := os.Stat(absParent)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("%w: not a directory", ErrInvalid)
+	}
+	// Refuse to copy a directory into itself / its own subtree.
+	if strings.HasPrefix(absParent, abs+string(os.PathSeparator)) || absParent == abs {
+		return fmt.Errorf("%w: cannot copy into itself", ErrInvalid)
+	}
+	dst := filepath.Join(absParent, filepath.Base(abs))
+	if _, err := os.Stat(dst); err == nil {
+		return fmt.Errorf("%w: destination exists", ErrExist)
+	}
+	return copyRecursive(abs, dst)
+}
+
+// copyRecursive copies a file, or a directory tree, from src to dst.
+func copyRecursive(src, dst string) error {
+	fi, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if !fi.IsDir() {
+		return copyFile(src, dst)
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := copyRecursive(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // Delete removes a file, or a directory recursively (for trash, the caller

@@ -34,6 +34,13 @@ export function authedFetch(url: string, init: RequestInit = {}): Promise<Respon
 let accessToken = '';
 let refreshToken = '';
 
+export function saveBlob(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function setTokens(a: string, r: string) { accessToken = a; refreshToken = r; }
 export function getAccess(): string { return accessToken; }
 export function getRefresh(): string { return refreshToken; }
@@ -107,6 +114,8 @@ export const api = {
     request('POST', '/api/fs/rename', { scope, path, new_name: newName }),
   move: (scope: string, path: string, newParent: string) =>
     request('POST', '/api/fs/move', { scope, path, new_parent: newParent }),
+  copy: (scope: string, path: string, newParent: string) =>
+    request('POST', '/api/fs/copy', { scope, path, new_parent: newParent }),
   remove: (scope: string, path: string) =>
     request('POST', '/api/fs/delete', { scope, path }),
 
@@ -161,10 +170,13 @@ export const api = {
   async downloadBlob(scope: string, path: string, name: string): Promise<void> {
     const res = await authedFetch(`${baseURL()}/api/fs/download?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}`);
     if (!res.ok) throw new Error('下载失败');
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = name; a.click();
-    URL.revokeObjectURL(url);
+    return saveBlob(await res.blob(), name);
+  },
+  /** Download multiple paths as a single zip archive. */
+  async zipDownload(scope: string, paths: string[], name = 'selected.zip'): Promise<void> {
+    const q = `scope=${encodeURIComponent(scope)}` + paths.map((p) => `&path=${encodeURIComponent(p)}`).join('');
+    const res = await authedFetch(`${baseURL()}/api/fs/zip?${q}`);
+    if (!res.ok) { let m = res.statusText; try { m = (await res.json()).error ?? m; } catch { /* ignore */ } throw new Error(m); }
+    return saveBlob(await res.blob(), name);
   },
 };
