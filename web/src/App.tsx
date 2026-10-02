@@ -147,8 +147,8 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
 
   interface NavItem { key: string; label: string; title: string; go: string }
   const nav: NavItem[] = [];
-  if (showUp) nav.push({ key: 'up1', label: '..', title: '上一级', go: parentPath });
   if (showUp2) nav.push({ key: 'up2', label: '...', title: '上两级', go: grandPath });
+  if (showUp) nav.push({ key: 'up1', label: '..', title: '上一级', go: parentPath });
 
   // ---- multi-select ----
   const toggleSel = (full: string) => setSel((prev) => {
@@ -324,18 +324,18 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
                   <th>名称</th><th>大小</th><th>修改时间</th>
                 </tr></thead>
                 <tbody>
-                  {showUp && (
-                    <tr className="nav-row" onClick={() => go(parentPath)}>
-                      <td className="chk"></td>
-                      <td>📁 <button className="link" onClick={(e) => { e.stopPropagation(); go(parentPath); }}>..</button></td>
-                      <td>—</td><td>上一级</td>
-                    </tr>
-                  )}
                   {showUp2 && (
                     <tr className="nav-row" onClick={() => go(grandPath)}>
                       <td className="chk"></td>
                       <td>📁 <button className="link" onClick={(e) => { e.stopPropagation(); go(grandPath); }}>...</button></td>
-                      <td>—</td><td>上两级</td>
+                      <td>—</td><td></td>
+                    </tr>
+                  )}
+                  {showUp && (
+                    <tr className="nav-row" onClick={() => go(parentPath)}>
+                      <td className="chk"></td>
+                      <td>📁 <button className="link" onClick={(e) => { e.stopPropagation(); go(parentPath); }}>..</button></td>
+                      <td>—</td><td></td>
                     </tr>
                   )}
                   {visible.map((it) => (
