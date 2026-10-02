@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE TABLE IF NOT EXISTS shares (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   token       TEXT NOT NULL UNIQUE,
+  scope       TEXT NOT NULL DEFAULT 'me',
   path        TEXT NOT NULL,
   password    TEXT NOT NULL DEFAULT '',
   expires_at  INTEGER NOT NULL DEFAULT 0,
@@ -154,7 +155,7 @@ func (s *Store) ListUsers() ([]User, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []User
+	out := make([]User, 0, 64)
 	for rows.Next() {
 		var u User
 		var isAdmin, disabled, created int64
@@ -246,23 +247,24 @@ func (s *Store) PruneSessions() error {
 
 // Share is a public link that exposes a path without requiring login.
 type Share struct {
-	ID        int64
-	Token     string
-	Path      string
-	Password  string
-	ExpiresAt time.Time
-	AllowDown bool
-	MaxUses   int64
-	Used      int64
-	CreatedBy int64
-	CreatedAt time.Time
+	ID        int64     `json:"id"`
+	Token     string    `json:"token"`
+	Scope     string    `json:"scope"`
+	Path      string    `json:"path"`
+	Password  string    `json:"-"`
+	ExpiresAt time.Time `json:"expires_at"`
+	AllowDown bool      `json:"allow_down"`
+	MaxUses   int64     `json:"max_uses"`
+	Used      int64     `json:"used"`
+	CreatedBy int64     `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func (s *Store) CreateShare(sh *Share) error {
 	res, err := s.db.Exec(
-		`INSERT INTO shares(token, path, password, expires_at, allow_down, max_uses, created_by, created_at)
-		 VALUES(?,?,?,?,?,?,?,?)`,
-		sh.Token, sh.Path, sh.Password, sh.ExpiresAt.Unix(), boolInt(sh.AllowDown),
+		`INSERT INTO shares(token, scope, path, password, expires_at, allow_down, max_uses, created_by, created_at)
+		 VALUES(?,?,?,?,?,?,?,?,?)`,
+		sh.Token, sh.Scope, sh.Path, sh.Password, sh.ExpiresAt.Unix(), boolInt(sh.AllowDown),
 		sh.MaxUses, sh.CreatedBy, time.Now().Unix())
 	if err != nil {
 		return err
@@ -273,18 +275,20 @@ func (s *Store) CreateShare(sh *Share) error {
 
 func (s *Store) GetShare(token string) (*Share, error) {
 	row := s.db.QueryRow(
-		`SELECT id, token, path, password, expires_at, allow_down, max_uses, used, created_by, created_at
+		`SELECT id, token, scope, path, password, expires_at, allow_down, max_uses, used, created_by, created_at
 		 FROM shares WHERE token = ?`, token)
 	var sh Share
 	var pw string
+	var scope string
 	var expires, allow, used, created int64
 	var maxUses int64
-	if err := row.Scan(&sh.ID, &sh.Token, &sh.Path, &pw, &expires, &allow, &maxUses, &used, &sh.CreatedBy, &created); err != nil {
+	if err := row.Scan(&sh.ID, &sh.Token, &scope, &sh.Path, &pw, &expires, &allow, &maxUses, &used, &sh.CreatedBy, &created); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
 	}
+	sh.Scope = scope
 	sh.Password = pw
 	sh.ExpiresAt = time.Unix(expires, 0)
 	sh.AllowDown = allow != 0
@@ -296,21 +300,23 @@ func (s *Store) GetShare(token string) (*Share, error) {
 
 func (s *Store) ListShares(createdBy int64) ([]Share, error) {
 	rows, err := s.db.Query(
-		`SELECT id, token, path, password, expires_at, allow_down, max_uses, used, created_by, created_at
+		`SELECT id, token, scope, path, password, expires_at, allow_down, max_uses, used, created_by, created_at
 		 FROM shares WHERE created_by = ? ORDER BY created_at DESC`, createdBy)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Share
+	out := make([]Share, 0, 32)
 	for rows.Next() {
 		var sh Share
 		var pw string
+		var scope string
 		var expires, allow, used, created int64
 		var maxUses int64
-		if err := rows.Scan(&sh.ID, &sh.Token, &sh.Path, &pw, &expires, &allow, &maxUses, &used, &sh.CreatedBy, &created); err != nil {
+		if err := rows.Scan(&sh.ID, &sh.Token, &scope, &sh.Path, &pw, &expires, &allow, &maxUses, &used, &sh.CreatedBy, &created); err != nil {
 			return nil, err
 		}
+		sh.Scope = scope
 		sh.Password = pw
 		sh.ExpiresAt = time.Unix(expires, 0)
 		sh.AllowDown = allow != 0
@@ -344,12 +350,12 @@ func (s *Store) BumpShareUsed(id int64) error {
 // ---- trash ----
 
 type TrashEntry struct {
-	ID        int64
-	OrigPath  string
-	TrashPath string
-	IsDir     bool
-	Size      int64
-	DeletedAt time.Time
+	ID        int64     `json:"id"`
+	OrigPath  string    `json:"orig_path"`
+	TrashPath string    `json:"trash_path"`
+	IsDir     bool      `json:"is_dir"`
+	Size      int64     `json:"size"`
+	DeletedAt time.Time `json:"deleted_at"`
 }
 
 func (s *Store) AddTrash(userID int64, e *TrashEntry) error {
@@ -372,7 +378,7 @@ func (s *Store) ListTrash(userID int64) ([]TrashEntry, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []TrashEntry
+	out := make([]TrashEntry, 0, 32)
 	for rows.Next() {
 		var e TrashEntry
 		var isDir, deleted int64

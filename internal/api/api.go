@@ -24,7 +24,9 @@ import (
 	"github.com/shiyi/starstack/internal/auth"
 	"github.com/shiyi/starstack/internal/config"
 	"github.com/shiyi/starstack/internal/fsops"
+	"github.com/shiyi/starstack/internal/preview"
 	"github.com/shiyi/starstack/internal/store"
+	"github.com/shiyi/starstack/internal/trash"
 )
 
 // Server wires config, storage and auth into an HTTP handler.
@@ -34,6 +36,8 @@ type Server struct {
 	auth  *auth.Service
 	fu    *fsops.Manager // personal space
 	fsu   *fsops.Manager // shared/public disk
+	trash *trash.Service
+	prev  *preview.Service
 	log   *slog.Logger
 }
 
@@ -47,9 +51,18 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger) (*Server, error)
 	if err != nil {
 		return nil, fmt.Errorf("shared space init: %w", err)
 	}
+	ts, err := trash.New(st, cfg.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("trash init: %w", err)
+	}
+	pv, err := preview.New(preview.Options{CacheDir: filepath.Join(cfg.DataDir, "cache"), MemoryEntries: 512})
+	if err != nil {
+		return nil, fmt.Errorf("preview init: %w", err)
+	}
 	return &Server{
 		cfg: cfg, store: st, log: log,
-		auth: auth.New(st, cfg.Secret), fu: fu, fsu: fsu,
+		auth: auth.New(st, cfg.Secret),
+		fu:   fu, fsu: fsu, trash: ts, prev: pv,
 	}, nil
 }
 
@@ -77,6 +90,9 @@ func (s *Server) Routes() http.Handler {
 
 			r.Post("/users", s.handleCreateUser)
 			r.Get("/users", s.handleListUsers)
+			r.Patch("/users/{id}/state", s.handleSetUserState)
+			r.Post("/users/{id}/password", s.handleResetPassword)
+			r.Get("/me", s.handleMe)
 
 			r.Get("/fs/list", s.handleList)
 			r.Post("/fs/mkdir", s.handleMkdir)
@@ -85,6 +101,14 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/fs/delete", s.handleDelete)
 			r.Post("/fs/upload", s.handleUpload)
 			r.Get("/fs/download", s.handleDownload)
+
+			r.Get("/trash/list", s.handleTrashList)
+			r.Post("/trash/restore", s.handleTrashRestore)
+			r.Post("/trash/purge", s.handleTrashPurge)
+			r.Post("/trash/empty", s.handleTrashEmpty)
+
+			r.Get("/preview/thumb", s.handleThumb)
+			r.Get("/preview/raw", s.handlePreviewRaw)
 
 			r.Get("/share/list", s.handleListShares)
 			r.Post("/share", s.handleCreateShare)
@@ -310,6 +334,80 @@ func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"users": out})
 }
 
+// handleMe returns the current user's profile plus their storage usage.
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+	me := s.currentUser(r)
+	_, err := s.fu.Resolve("/")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "fs error")
+		return
+	}
+	entries, err := s.fu.List("/")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "fs error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": me.ID, "username": me.Username, "is_admin": me.IsAdmin, "disabled": me.Disabled,
+		"scope_me": "/", "items": len(entries),
+	})
+}
+
+// handleSetUserState enables/disables a user (admin only).
+func (s *Server) handleSetUserState(w http.ResponseWriter, r *http.Request) {
+	if !s.currentUser(r).IsAdmin {
+		writeErr(w, http.StatusForbidden, "admin only")
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	var req struct {
+		Disabled *bool `json:"disabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Disabled == nil {
+		writeErr(w, http.StatusBadRequest, "disabled required")
+		return
+	}
+	if err := s.store.SetDisabled(id, *req.Disabled); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleResetPassword resets a user's password (admin only).
+func (s *Server) handleResetPassword(w http.ResponseWriter, r *http.Request) {
+	if !s.currentUser(r).IsAdmin {
+		writeErr(w, http.StatusForbidden, "admin only")
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Password == "" {
+		writeErr(w, http.StatusBadRequest, "password required")
+		return
+	}
+	hash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "hash error")
+		return
+	}
+	if err := s.store.UpdatePassword(id, hash); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 // ---- file operations ----
 
 func (s *Server) fileParams(r *http.Request) (scope, virtual string, err error) {
@@ -363,6 +461,9 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
+	if req.Scope == "" {
+		req.Scope = "me"
+	}
 	mgr, err := s.mgrFor(req.Scope)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -385,6 +486,9 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
+	if req.Scope == "" {
+		req.Scope = "me"
+	}
 	mgr, err := s.mgrFor(req.Scope)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -406,16 +510,72 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
+	if req.Scope == "" {
+		req.Scope = "me"
+	}
 	mgr, err := s.mgrFor(req.Scope)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := mgr.Delete(req.Path); err != nil {
+	// Delete moves the item into the acting user's trash (recoverable).
+	if err := s.trash.Trash(s.currentUser(r).ID, mgr, req.Scope, req.Path); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "trashed"})
+}
+
+// handleTrashList returns the trash for the calling user.
+func (s *Server) handleTrashList(w http.ResponseWriter, r *http.Request) {
+	entries, err := s.trash.List(s.currentUser(r).ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"trash": entries})
+}
+
+// handleTrashRestore moves an item back to its original location.
+func (s *Server) handleTrashRestore(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if err := s.trash.Restore(s.currentUser(r).ID, req.ID, s.mgrFor); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "restored"})
+}
+
+// handleTrashPurge permanently deletes a single trash item.
+func (s *Server) handleTrashPurge(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if err := s.trash.Purge(s.currentUser(r).ID, req.ID); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleTrashEmpty permanently deletes all trash for the user.
+func (s *Server) handleTrashEmpty(w http.ResponseWriter, r *http.Request) {
+	n, err := s.trash.Empty(s.currentUser(r).ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"purged": n})
 }
 
 // handleUpload streams an uploaded file into the target directory.
@@ -508,6 +668,73 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, name, st.ModTime(), file)
 }
 
+// handleThumb serves a generated JPEG thumbnail for an image (with disk+memory cache).
+func (s *Server) handleThumb(w http.ResponseWriter, r *http.Request) {
+	scope, virtual, _ := s.fileParams(r)
+	mgr, err := s.mgrFor(scope)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	abs, err := mgr.Resolve(virtual)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	if !preview.SupportedImage(abs) {
+		writeErr(w, http.StatusUnsupportedMediaType, "not an image")
+		return
+	}
+	size := 0
+	if sz, err := strconv.Atoi(r.URL.Query().Get("size")); err == nil {
+		size = sz
+	}
+	thumb, err := s.prev.Thumb(abs, size)
+	if err != nil {
+		writeErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(thumb)
+}
+
+// handlePreviewRaw streams a file inline (no attachment disposition) so
+// browsers can embed images, audio, video and PDFs. Supports HTTP Range.
+func (s *Server) handlePreviewRaw(w http.ResponseWriter, r *http.Request) {
+	scope, virtual, _ := s.fileParams(r)
+	mgr, err := s.mgrFor(scope)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	abs, err := mgr.Resolve(virtual)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	file, err := os.Open(abs)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	defer file.Close()
+	st, err := file.Stat()
+	if err != nil || st.IsDir() {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	name := filepath.Base(abs)
+	if ct := mime.TypeByExtension(filepath.Ext(name)); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	w.Header().Set("Content-Disposition", "inline")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	http.ServeContent(w, r, name, st.ModTime(), file)
+}
+
 func (s *Server) handleListShares(w http.ResponseWriter, r *http.Request) {
 	shares, err := s.store.ListShares(s.currentUser(r).ID)
 	if err != nil {
@@ -530,6 +757,9 @@ func (s *Server) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
+	if req.Scope == "" {
+		req.Scope = "me"
+	}
 	mgr, err := s.mgrFor(req.Scope)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -539,8 +769,13 @@ func (s *Server) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "path not found")
 		return
 	}
+	if _, err := mgr.Stat(req.Path); err != nil {
+		writeErr(w, http.StatusNotFound, "path not found")
+		return
+	}
 	sh := &store.Share{
 		Token:     newToken(req.Path),
+		Scope:     req.Scope,
 		Path:      req.Path,
 		Password:  req.Password,
 		ExpiresAt: time.Unix(req.ExpiresAt, 0),
@@ -590,14 +825,10 @@ func (s *Server) handleShareToken(next http.HandlerFunc) http.HandlerFunc {
 			}
 		}
 		_ = s.store.BumpShareUsed(sh.ID)
-		// Rewrite the query: scope/share + path come from the share record.
+		// Rewrite the query so the shared scope + path are served.
 		q := r.URL.Query()
-		scope := "share"
-		if !strings.HasPrefix(sh.Path, "share:") {
-			scope = "me"
-		}
-		q.Set("scope", scope)
-		q.Set("path", strings.TrimPrefix(sh.Path, scope+":"))
+		q.Set("scope", sh.Scope)
+		q.Set("path", sh.Path)
 		r.URL.RawQuery = q.Encode()
 		next(w, r)
 	}
