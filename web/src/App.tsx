@@ -88,6 +88,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<Item | null>(null);
   const [view, setView] = useState<'list' | 'grid'>('list');
+  const [viewManual, setViewManual] = useState(false); // user overrode auto view
   const [showHidden, setShowHidden] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ x: number; y: number; target: Item } | null>(null);
@@ -114,7 +115,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
 
   useEffect(() => { if (tab === 'files') void load(scope, cwd); }, [scope, cwd, tab, load]);
 
-  const go = (dir: string) => { setCwd(dir); setSel(new Set()); setMenu(null); };
+  const go = (dir: string) => { setCwd(dir); setSel(new Set()); setMenu(null); setViewManual(false); };
   const refresh = () => void load(scope, cwd);
 
   const doUpload = async (files: File[]) => {
@@ -140,6 +141,12 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
   const isImage = (n: string) => PREVIEW_IMAGE.test(n);
   const trail = cwd.split('/').filter(Boolean);
   const visible = showHidden ? items : items.filter((it) => !it.name.startsWith('.'));
+  // Auto view: mostly files with >=80% images -> grid, otherwise list.
+  const files = items.filter((it) => !it.is_dir);
+  const fileRatio = items.length ? files.length / items.length : 0;
+  const imageRatio = files.length ? files.filter((it) => PREVIEW_IMAGE.test(it.name)).length / files.length : 0;
+  const autoView: 'list' | 'grid' = fileRatio >= 0.7 && imageRatio >= 0.8 ? 'grid' : 'list';
+  useEffect(() => { if (tab === 'files' && !viewManual) setView(autoView); }, [autoView, tab, viewManual]);
   const parentPath = upPath(cwd, 1);
   const grandPath = upPath(cwd, 2);
   const showUp = parentPath !== cwd;
@@ -282,8 +289,8 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
             </button>
             <div className="view-toggle">
               {view === 'list'
-                ? <button title="切换到网格视图" onClick={() => setView('grid')}>▦</button>
-                : <button title="切换到列表视图" onClick={() => setView('list')}>☰</button>}
+                ? <button title="自动视图" onClick={() => { setView('grid'); setViewManual(true); }}>▦</button>
+                : <button title="自动视图" onClick={() => { setView('list'); setViewManual(true); }}>☰</button>}
             </div>
           </div>
           {sel.size > 0 && (
