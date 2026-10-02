@@ -31,6 +31,7 @@ var ErrUnsupported = errors.New("unsupported image format")
 type Service struct {
 	cacheDir string
 	lru      *lru.Cache[string, []byte]
+	ff       *ffmpegRunner
 }
 
 // Options configures the preview cache.
@@ -51,7 +52,7 @@ func New(opt Options) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{cacheDir: opt.CacheDir, lru: lru}, nil
+	return &Service{cacheDir: opt.CacheDir, lru: lru, ff: newFFmpeg(4)}, nil
 }
 
 // Thumb generates a JPEG thumbnail for an image file, reusing the memory or
@@ -83,13 +84,26 @@ func (s *Service) Thumb(imagePath string, size, quality int) ([]byte, error) {
 		return b, nil
 	}
 
-	thumb, err := renderThumb(imagePath, size, quality)
+	thumb, err := s.generateThumb(imagePath, size, quality)
 	if err != nil {
 		return nil, err
 	}
 	_ = os.WriteFile(disk, thumb, 0o644)
 	s.lru.Add(key, thumb)
 	return thumb, nil
+}
+
+// generateThumb picks the ffmpeg fast path (no EXIF orientation needed) or
+// falls back to the pure-Go decoder.
+func (s *Service) generateThumb(imagePath string, size, quality int) ([]byte, error) {
+	// ffmpeg renders without applying EXIF orientation; route EXIF-oriented
+	// images through the Go path which normalizes them first.
+	if readOrientation(imagePath) <= 1 {
+		if b, ok := s.ff.fastThumbBytes(imagePath, size, quality); ok {
+			return b, nil
+		}
+	}
+	return renderThumb(imagePath, size, quality)
 }
 
 // Invalidate removes every cached thumbnail for imagePath (across sizes and
