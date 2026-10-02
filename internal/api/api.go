@@ -1,0 +1,617 @@
+// Package api offers the HTTP REST surface for authentication and file CRUD.
+package api
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"mime"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/shiyi/starstack/internal/auth"
+	"github.com/shiyi/starstack/internal/config"
+	"github.com/shiyi/starstack/internal/fsops"
+	"github.com/shiyi/starstack/internal/store"
+)
+
+// Server wires config, storage and auth into an HTTP handler.
+type Server struct {
+	cfg   *config.Config
+	store *store.Store
+	auth  *auth.Service
+	fu    *fsops.Manager // personal space
+	fsu   *fsops.Manager // shared/public disk
+	log   *slog.Logger
+}
+
+// New constructs the Server and its dependency managers.
+func New(cfg *config.Config, st *store.Store, log *slog.Logger) (*Server, error) {
+	fu, err := fsops.New(filepath.Join(cfg.DataDir, "users"))
+	if err != nil {
+		return nil, fmt.Errorf("personal space init: %w", err)
+	}
+	fsu, err := fsops.New(cfg.ShareRoot)
+	if err != nil {
+		return nil, fmt.Errorf("shared space init: %w", err)
+	}
+	return &Server{
+		cfg: cfg, store: st, log: log,
+		auth: auth.New(st, cfg.Secret), fu: fu, fsu: fsu,
+	}, nil
+}
+
+// Routes returns the configured chi router.
+func (s *Server) Routes() http.Handler {
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Recoverer)
+	r.Use(cors)
+
+	r.Route("/api", func(r chi.Router) {
+		// Public
+		r.Post("/auth/login", s.handleLogin)
+		r.Post("/auth/refresh", s.handleRefresh)
+		r.Get("/health", s.handleHealth)
+
+		// Board controls (used to avoid duplicating users)
+		r.Get("/users/first", s.handleFirstUser)
+
+		// Authenticated
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireAuth)
+			r.Post("/auth/logout", s.handleLogout)
+
+			r.Post("/users", s.handleCreateUser)
+			r.Get("/users", s.handleListUsers)
+
+			r.Get("/fs/list", s.handleList)
+			r.Post("/fs/mkdir", s.handleMkdir)
+			r.Post("/fs/rename", s.handleRename)
+			r.Post("/fs/move", s.handleMove)
+			r.Post("/fs/delete", s.handleDelete)
+			r.Post("/fs/upload", s.handleUpload)
+			r.Get("/fs/download", s.handleDownload)
+
+			r.Get("/share/list", s.handleListShares)
+			r.Post("/share", s.handleCreateShare)
+			r.Delete("/share/{token}", s.handleDeleteShare)
+		})
+
+		// Public share token access (no auth)
+		r.Get("/share/{token}/download", s.handleShareToken(s.handleDownload))
+		r.Get("/share/{token}/list", s.handleShareToken(s.handleList))
+	})
+
+	return r
+}
+
+func cors(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization,Content-Type,Range")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// ---- helpers ----
+
+func (s *Server) mgrFor(scope string) (*fsops.Manager, error) {
+	switch scope {
+	case "", "me":
+		return s.fu, nil
+	case "share":
+		return s.fsu, nil
+	}
+	return nil, fmt.Errorf("invalid scope %q", scope)
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeErr(w http.ResponseWriter, code int, msg string) {
+	writeJSON(w, code, map[string]string{"error": msg})
+}
+
+func (s *Server) currentUser(r *http.Request) *store.User {
+	return r.Context().Value(ctxKeyUser).(*store.User)
+}
+
+// ctxKey is a private type for request context values.
+type ctxKeyType int
+
+const ctxKeyUser ctxKeyType = 0
+
+// handleHealth reports liveness + version.
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// ---- auth handlers ----
+
+// handleFirstUser reports whether any user exists (to UI bootstrap admin).
+func (s *Server) handleFirstUser(w http.ResponseWriter, r *http.Request) {
+	n, err := s.store.CountUsers()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"has_users": n > 0})
+}
+
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	// First registered user is the admin.
+	admin := false
+	count, err := s.store.CountUsers()
+	if err == nil && count == 0 {
+		admin = true
+	}
+	if err := s.ensureUser(req.Username, req.Password, admin); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	access, refresh, u, err := s.auth.Login(req.Username, req.Password)
+	if err != nil {
+		if errors.Is(err, auth.ErrUnauth) || errors.Is(err, auth.ErrInvalid) {
+			writeErr(w, http.StatusUnauthorized, "invalid username or password")
+			return
+		}
+		writeErr(w, http.StatusForbidden, "account disabled")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"access_token": access, "refresh_token": refresh,
+		"user": map[string]any{"id": u.ID, "username": u.Username, "is_admin": u.IsAdmin},
+	})
+}
+
+// ensureUser creates the user on first run deterministically (idempotent).
+func (s *Server) ensureUser(username, password string, admin bool) error {
+	_, err := s.store.GetUserByName(username)
+	if errors.Is(err, store.ErrNotFound) {
+		hash, err := auth.HashPassword(password)
+		if err != nil {
+			return fmt.Errorf("hash error")
+		}
+		if _, err := s.store.CreateUser(username, hash, admin); err != nil {
+			return fmt.Errorf("user create failed")
+		}
+	}
+	return nil
+}
+
+func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	access, refresh, u, err := s.auth.Refresh(req.RefreshToken)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"access_token": access, "refresh_token": refresh,
+		"user": map[string]any{"id": u.ID, "username": u.Username, "is_admin": u.IsAdmin},
+	})
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.RefreshToken != "" {
+		_ = s.auth.Logout(req.RefreshToken)
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// requireAuth guards authenticated routes.
+func (s *Server) requireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ah := r.Header.Get("Authorization")
+		token := strings.TrimPrefix(ah, "Bearer ")
+		if token == "" || token == ah {
+			writeErr(w, http.StatusUnauthorized, "missing token")
+			return
+		}
+		u, err := s.auth.ParseAccessToken(token)
+		if err != nil || u == nil {
+			writeErr(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		ctx := contextWithUser(r.Context(), u)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func contextWithUser(ctx context.Context, u *store.User) context.Context {
+	return context.WithValue(ctx, ctxKeyUser, u)
+}
+
+// ---- user management ----
+
+func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	me := s.currentUser(r)
+	if !me.IsAdmin {
+		writeErr(w, http.StatusForbidden, "admin only")
+		return
+	}
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Admin    bool   `json:"is_admin"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Username == "" || req.Password == "" {
+		writeErr(w, http.StatusBadRequest, "username and password required")
+		return
+	}
+	hash, err := auth.HashPassword(req.Password)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "hash error")
+		return
+	}
+	if _, err := s.store.CreateUser(req.Username, hash, req.Admin); err != nil {
+		writeErr(w, http.StatusConflict, "username taken")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"status": "created"})
+}
+
+func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	if !s.currentUser(r).IsAdmin {
+		writeErr(w, http.StatusForbidden, "admin only")
+		return
+	}
+	users, err := s.store.ListUsers()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	out := make([]map[string]any, 0, len(users))
+	for _, u := range users {
+		out = append(out, map[string]any{
+			"id": u.ID, "username": u.Username, "is_admin": u.IsAdmin, "disabled": u.Disabled,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"users": out})
+}
+
+// ---- file operations ----
+
+func (s *Server) fileParams(r *http.Request) (scope, virtual string, err error) {
+	scope = r.URL.Query().Get("scope")
+	if scope == "" {
+		scope = "me"
+	}
+	virtual = r.URL.Query().Get("path")
+	if virtual == "" {
+		virtual = "/"
+	}
+	return scope, virtual, nil
+}
+
+func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
+	scope, virtual, _ := s.fileParams(r)
+	mgr, err := s.mgrFor(scope)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	entries, err := mgr.List(virtual)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "path not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"path": virtual, "entries": entries})
+}
+
+func (s *Server) handleMkdir(w http.ResponseWriter, r *http.Request) {
+	scope, virtual, _ := s.fileParams(r)
+	mgr, err := s.mgrFor(scope)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := mgr.Mkdir(virtual); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Scope   string `json:"scope"`
+		Path    string `json:"path"`
+		NewName string `json:"new_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	mgr, err := s.mgrFor(req.Scope)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := mgr.Rename(req.Path, req.NewName); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Scope     string `json:"scope"`
+		Path      string `json:"path"`
+		NewParent string `json:"new_parent"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	mgr, err := s.mgrFor(req.Scope)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := mgr.Move(req.Path, req.NewParent); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Scope string `json:"scope"`
+		Path  string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	mgr, err := s.mgrFor(req.Scope)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := mgr.Delete(req.Path); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleUpload streams an uploaded file into the target directory.
+// Form fields: dir (destination virtual dir), scope; files under "files".
+func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	scope := r.URL.Query().Get("scope")
+	if scope == "" {
+		scope = "me"
+	}
+	dir := r.FormValue("dir")
+	if dir == "" {
+		dir = "/"
+	}
+	mgr, err := s.mgrFor(scope)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	destDir, err := mgr.Resolve(dir)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid destination")
+		return
+	}
+	if fi, err := os.Stat(destDir); err != nil || !fi.IsDir() {
+		writeErr(w, http.StatusNotFound, "destination not found")
+		return
+	}
+	if err := r.ParseMultipartForm(s.cfg.MaxUploadMB * 1024 * 1024); err != nil {
+		writeErr(w, http.StatusBadRequest, "upload too large")
+		return
+	}
+	files := r.MultipartForm.File["files"]
+	result := []map[string]any{}
+	for _, fh := range files {
+		src, err := fh.Open()
+		if err != nil {
+			result = append(result, map[string]any{"name": fh.Filename, "error": "open failed"})
+			continue
+		}
+		dstPath := filepath.Join(destDir, filepath.Base(fh.Filename))
+		dst, err := os.Create(dstPath)
+		if err != nil {
+			result = append(result, map[string]any{"name": fh.Filename, "error": "create failed"})
+			src.Close()
+			continue
+		}
+		n, werr := io.Copy(dst, src)
+		dst.Close()
+		src.Close()
+		if werr != nil {
+			_ = os.Remove(dstPath)
+			result = append(result, map[string]any{"name": fh.Filename, "error": "write failed"})
+			continue
+		}
+		result = append(result, map[string]any{"name": fh.Filename, "size": n, "ok": true})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"uploaded": result})
+}
+
+// handleDownload serves a file with Range support for resume + streaming video.
+func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
+	scope, virtual, _ := s.fileParams(r)
+	mgr, err := s.mgrFor(scope)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	abs, err := mgr.Resolve(virtual)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	file, err := os.Open(abs)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	defer file.Close()
+	st, err := file.Stat()
+	if err != nil || st.IsDir() {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	name := filepath.Base(abs)
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+escapeQuote(name)+"\"")
+	if ct := mime.TypeByExtension(filepath.Ext(name)); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeContent(w, r, name, st.ModTime(), file)
+}
+
+func (s *Server) handleListShares(w http.ResponseWriter, r *http.Request) {
+	shares, err := s.store.ListShares(s.currentUser(r).ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"shares": shares})
+}
+
+func (s *Server) handleCreateShare(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Scope     string `json:"scope"`
+		Path      string `json:"path"`
+		Password  string `json:"password"`
+		ExpiresAt int64  `json:"expires_at"` // unix; 0 = never
+		AllowDown bool   `json:"allow_down"`
+		MaxUses   int64  `json:"max_uses"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	mgr, err := s.mgrFor(req.Scope)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := mgr.Resolve(req.Path); err != nil {
+		writeErr(w, http.StatusNotFound, "path not found")
+		return
+	}
+	sh := &store.Share{
+		Token:     newToken(req.Path),
+		Path:      req.Path,
+		Password:  req.Password,
+		ExpiresAt: time.Unix(req.ExpiresAt, 0),
+		AllowDown: req.AllowDown,
+		MaxUses:   req.MaxUses,
+		CreatedBy: s.currentUser(r).ID,
+	}
+	if err := s.store.CreateShare(sh); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"token": sh.Token})
+}
+
+func (s *Server) handleDeleteShare(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	if err := s.store.DeleteShare(token); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleShareToken adapts a handler so unauthenticated share links can access
+// a file/dir, enforcing expiry, use limits and an optional password.
+func (s *Server) handleShareToken(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := chi.URLParam(r, "token")
+		sh, err := s.store.GetShare(token)
+		if err != nil {
+			writeErr(w, http.StatusNotFound, "share not found")
+			return
+		}
+		if sh.ExpiresAt.Unix() > 0 && time.Now().After(sh.ExpiresAt) {
+			writeErr(w, http.StatusGone, "share expired")
+			return
+		}
+		if sh.MaxUses > 0 && sh.Used >= sh.MaxUses {
+			writeErr(w, http.StatusGone, "share exhausted")
+			return
+		}
+		// Optional password via ?pw= query param.
+		if sh.Password != "" {
+			if r.URL.Query().Get("pw") != sh.Password {
+				writeErr(w, http.StatusUnauthorized, "password required")
+				return
+			}
+		}
+		_ = s.store.BumpShareUsed(sh.ID)
+		// Rewrite the query: scope/share + path come from the share record.
+		q := r.URL.Query()
+		scope := "share"
+		if !strings.HasPrefix(sh.Path, "share:") {
+			scope = "me"
+		}
+		q.Set("scope", scope)
+		q.Set("path", strings.TrimPrefix(sh.Path, scope+":"))
+		r.URL.RawQuery = q.Encode()
+		next(w, r)
+	}
+}
+
+func newToken(seed string) string {
+	return sha256Sum(seed + strconv.FormatInt(time.Now().UnixNano(), 10))
+}
+
+func sha256Sum(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+func escapeQuote(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, `"`, `\"`), "\n", " ")
+}

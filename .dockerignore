@@ -1,0 +1,8 @@
+.git
+.gitignore
+*.md
+docs
+web/node_modules
+web/dist
+data
+/tmp

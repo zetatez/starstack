@@ -27,6 +27,15 @@ go.work.sum
 # env file
 .env
 
+# StarStack
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo
+data/
+share/
+deploy/data/
+login.json
+
 # Editor/IDE
 # .idea/
 # .vscode/

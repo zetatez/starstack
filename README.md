@@ -1,2 +1,51 @@
-# starstack
-Star stack
+# StarStack
+
+本地私有云盘：多用户、Go 后端、React 前端、Docker 一键部署、挂载本地盘共享。
+
+## 功能（当前实现）
+
+- 多用户认证（JWT + RefreshToken 轮换，首个用户自动为管理员）
+- 个人空间 + 共享盘（宿主机目录挂载）
+- 文件操作：上传（多文件/拖拽、流式）、下载（支持 HTTP Range/断点续传）、
+  新建目录、重命名、移动、删除
+- 路径穿越防护、回收站/分享链接底层 API 已就绪（分享 UI 待接入）
+
+> 完整设计见 [docs/DESIGN.md](docs/DESIGN.md)（预览/缓存体系、最小化配置、日志轮转等）。
+
+## 本地开发
+
+```bash
+# 后端（默认 :8080，个人空间/分享目录可在环境变量指定）
+LISTEN=:8080 DATA_DIR=./data SHARE_ROOT=./share go run ./cmd/starstack
+
+# 前端（vite 代理 /api → :18080，如后端端口不同改 vite.config.ts）
+cd web && npm install && npm run dev
+```
+
+## Docker 部署
+
+```bash
+cd deploy
+docker compose up -d --build
+# 打开 http://localhost:8080 ，首个注册用户即管理员
+```
+
+挂载说明：`docker-compose.yml` 中 `/data/cloud:/share` 即宿主机目录→共享盘，
+修改该卷路径即可指向任意本地目录。
+
+环境变量（全部可选，见 docs/DESIGN.md §12）：
+
+| 变量 | 默认 | 说明 |
+|------|------|------|
+| `LISTEN` | `:8080` | 后端监听 |
+| `DATA_DIR` | `/app/data` | SQLite、个人空间、缓存 |
+| `SHARE_ROOT` | `/share` | 共享盘挂载点 |
+| `SECRET` | 自动生成 | JWT/分享签名密钥（留空随机生成并持久化） |
+| `LOG_LEVEL` | `info` | `info` / `debug` |
+
+## 测试
+
+```bash
+go test ./...          # 单元测试
+go build ./... && go vet ./...
+```
