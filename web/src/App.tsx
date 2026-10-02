@@ -400,7 +400,6 @@ function GridBulk(props: {
           return (
             <div key={`nav-${n.key}`} className="gcard gnav" style={style} onClick={() => onNav(n.go)} title={n.title}>
               <div className="gthumb gnav-big">{n.label}</div>
-              <div className="gname">{n.title}</div>
             </div>
           );
         }
