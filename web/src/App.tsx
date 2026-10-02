@@ -573,10 +573,9 @@ function PreviewModal({ item, scope, onClose }: { item: Item; scope: Scope; onCl
   return (
     <div className="modal-bg" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <span className="brand">{item.name}</span>
-          <button className="ghost" onClick={() => void api.downloadBlob(scope, item.full, item.name)}>下载</button>
-          <button className="ghost" onClick={onClose}>✕</button>
+        <div className="modal-actions">
+          <button className="ghost" title="下载" onClick={() => void api.downloadBlob(scope, item.full, item.name)}>⬇</button>
+          <button className="ghost" title="关闭 (Esc)" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
           {PREVIEW_IMAGE.test(item.name) ? <img className="preview-img" src={raw} alt={item.name} />
