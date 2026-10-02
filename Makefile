@@ -9,8 +9,8 @@
 #   make lint         run staticcheck (if installed); falls back to go vet
 #   make fmt          gofmt the Go source, prettier-agnostic (see fmt-full)
 #   make docker       build the Docker image
-#   make up           docker compose up -d --build (deploy/)
-#   make down         docker compose stop + remove (deploy/)
+#   make up           docker compose up -d --build (root docker-compose.yaml)
+#   make down         docker compose stop + remove
 #   make clean        remove local build artifacts
 
 SHELL            := /bin/sh
@@ -19,8 +19,7 @@ VERSION          ?= $(shell git describe --tags --always --dirty 2>/dev/null || 
 REGISTRY         ?=
 IMAGE_NAME       ?= starstack
 IMAGE            := $(if $(REGISTRY),$(REGISTRY)/,)$(IMAGE_NAME):$(VERSION)
-COMPOSE_DIR      := deploy
-COMPOSE          := docker compose -f $(COMPOSE_DIR)/docker-compose.yml
+COMPOSE          := docker compose -f docker-compose.yaml
 
 LDFLAGS          := -s -w -X main.version=$(VERSION)
 BINDIR           := bin
@@ -74,12 +73,12 @@ fmt:                      ## gofmt the Go source
 ## ---- docker / deploy ----
 
 image:                    ## build the Docker image
-	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE) -f $(COMPOSE_DIR)/Dockerfile .
+	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE) -f Dockerfile .
 
 docker: image
 	@echo "image ready: $(IMAGE)"
 
-up:                       ## build & start stack (deploy/docker-compose.yml)
+up:                       ## build & start stack (docker-compose.yaml)
 	$(COMPOSE) up -d --build
 
 down:                     ## stop & remove stack

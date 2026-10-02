@@ -25,8 +25,8 @@ RUN apk add --no-cache ffmpeg ca-certificates tzdata
 
 COPY --from=backend /out/starstack /usr/local/bin/starstack
 COPY --from=frontend /web/dist /usr/share/nginx/html
-COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
-COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Run as a non-root user owned directories.
 RUN mkdir -p /app/data /share \

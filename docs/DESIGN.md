@@ -195,7 +195,10 @@ starstack/
 ├── web/              # 前端 (React+Vite+TS)
 │   ├── src/
 │   └── dist/         # 构建产物, 由 Nginx 托管
-├── deploy/           # Dockerfile, docker-compose, nginx.conf
+├── Dockerfile          # 多阶段构建镜像
+├── docker-compose.yaml # 一键部署编排
+├── entrypoint.sh       # 容器启动入口
+├── nginx.conf          # 静态托管 + API 反代
 └── docs/DESIGN.md
 ```
 

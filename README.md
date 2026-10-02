@@ -35,18 +35,18 @@ cd web && npm install && npm run dev
 ## Docker 部署
 
 ```bash
-make up          # = docker compose up -d --build (deploy/docker-compose.yml)
+make up          # = docker compose up -d --build (docker-compose.yaml)
 make image       # 仅构建镜像
 make logs        # 查看日志
 make down        # 停止
 
 # 或手动：
-cd deploy && docker compose up -d --build
+docker compose up -d --build
 # 打开 http://localhost:8290 ，首个注册用户即管理员
 ```
 
-挂载说明：`docker-compose.yml` 中 `/data/cloud:/share` 即宿主机目录→共享盘，
-修改该卷路径即可指向任意本地目录。
+挂载说明：`docker-compose.yaml` 中 `SHARE_DIR`（默认 `/data/cloud`）即宿主机目录→共享盘，
+通过 `SHARE_DIR=<本地目录> docker compose up -d` 或修改该卷路径指向任意本地目录。
 
 环境变量（全部可选，见 docs/DESIGN.md §12）：
 

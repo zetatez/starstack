@@ -1,0 +1,45 @@
+services:
+  starstack:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+    image: starstack:latest
+    container_name: starstack
+    restart: unless-stopped
+
+    ports:
+      - "${PORT:-8290}:80"        # 对外端口（默认 8290）→ 容器 nginx :80
+
+    volumes:
+      - ./data:/app/data:rw       # SQLite + 个人空间 + 缓存
+      - ${SHARE_DIR:-/data/cloud}:/share:rw   # 宿主机目录 → 共享盘
+
+    environment:
+      - LISTEN=:8080              # Go 内部端口（nginx 反代目标，勿改）
+      - DATA_DIR=/app/data
+      - SHARE_ROOT=/share
+      # 留空则首次启动自动生成并写入 data/secret（重启不失效）。
+      # 生产建议显式设置：SECRET=<强随机串>
+      - SECRET=${SECRET:-}
+
+    # 配置自动清理，避免日志无限增长
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # 健康检查：容器 nginx 反代到 Go /api/health
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+    stop_grace_period: 30s        # 给 entrypoint 足够时间优雅退出 nginx 与 Go
+
+    security_opt:
+      - no-new-privileges:true    # 禁止提权（配合非 root 运行）
