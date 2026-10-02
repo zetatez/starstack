@@ -32,6 +32,10 @@ func RotateOnDisk(path string, angle int) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrUnsupportedFormat, err)
 	}
+	// Normalize EXIF orientation first so the requested rotation applies to
+	// the visually-corrected image (same as the browser shows), and re-encode
+	// pixels without the stale orientation tag.
+	img = orientExif(path, img)
 	rotated := rotateImage(img, angle)
 
 	var buf bytes.Buffer

@@ -138,6 +138,9 @@ func renderThumb(imagePath string, size, quality int) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnsupported, err)
 	}
+	// Match browser display: honor EXIF orientation so thumbnails align with
+	// the raw preview.
+	img = orientExif(imagePath, img)
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	if w == 0 || h == 0 {
