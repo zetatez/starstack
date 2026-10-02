@@ -47,20 +47,22 @@ export function saveBlob(blob: Blob, name: string) {
 // instantly instead of re-requesting.
 const thumbLru = new Map<string, string>();
 const THUMB_LRU_MAX = 800;
+let thumbRev = 0; // bumped on rotation so browsers don't serve stale cached thumbs
+export function bumpThumbs() { thumbRev++; thumbLru.clear(); }
 export function thumbSrc(scope: string, path: string, size: number, q = 60): string {
-  const key = `${scope}\u0000${path}\u0000${size}\u0000${q}`;
+  const pre = api.preview.thumbURL(scope, path, size, q);
+  const key = scope + '\u0000' + path + '\u0000' + size + '\u0000' + q + '\u0000' + thumbRev;
   const hit = thumbLru.get(key);
   if (hit) {
     thumbLru.delete(key);
-    thumbLru.set(key, hit); // move to most-recently-used end
+    thumbLru.set(key, hit);
     return hit;
   }
-  const url = api.preview.thumbURL(scope, path, size, q);
-  thumbLru.set(key, url);
+  thumbLru.set(key, pre);
   if (thumbLru.size > THUMB_LRU_MAX) {
-    thumbLru.delete(thumbLru.keys().next().value!); // evict least-recently-used
+    thumbLru.delete(thumbLru.keys().next().value!);
   }
-  return url;
+  return pre;
 }
 
 export function setTokens(a: string, r: string) { accessToken = a; refreshToken = r; }
@@ -150,7 +152,7 @@ export const api = {
 
   preview: {
     thumbURL: (scope: string, path: string, size = 96, q = 70) =>
-      `${baseURL()}/api/preview/thumb?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}&size=${size}&q=${q}&auth=${encodeURIComponent(accessToken)}`,
+      `${baseURL()}/api/preview/thumb?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}&size=${size}&q=${q}&rev=${thumbRev}&auth=${encodeURIComponent(accessToken)}`,
     rawURL: (scope: string, path: string) =>
       `${baseURL()}/api/preview/raw?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}&auth=${encodeURIComponent(accessToken)}`,
     async text(scope: string, path: string): Promise<string> {
@@ -159,6 +161,9 @@ export const api = {
       return res.text();
     },
   },
+
+  rotate: (scope: string, paths: string[], angle: number) =>
+    request<{ rotated: { path: string; ok?: boolean; error?: string }[] }>('POST', '/api/preview/rotate', { scope, paths, angle }),
 
   share: {
     list: () => request<{ shares: Share[] }>('GET', '/api/share/list'),

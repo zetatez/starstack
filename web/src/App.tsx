@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import './app.css';
-import { api, setTokens, clearTokens, getAccess, getRefresh, thumbSrc,
+import { api, setTokens, clearTokens, getAccess, getRefresh, thumbSrc, bumpThumbs,
   type Entry, type UserInfo, type TrashItem, type Share, type UserRow } from './api';
 
 type Scope = 'me' | 'share';
@@ -213,6 +213,15 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
     if (action === 'move') return void batch.move();
     if (action === 'delete') return void batch.del();
   };
+  const rotateSel = async (angle: number) => {
+    if (!sel.size) return;
+    setMenu(null);
+    const paths = [...sel].filter((p) => PREVIEW_IMAGE.test(p));
+    if (!paths.length) { setError('所选项目中没有可旋转的图片'); return; }
+    setError('');
+    try { await api.rotate(scope, paths, angle); bumpThumbs(); clearSel(); refresh(); }
+    catch (e) { setError((e as Error).message); }
+  };
 
   return (
     <div className="sheet">
@@ -341,6 +350,11 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
             <button onClick={() => menuAct('copy')}>📋 {sel.size > 1 ? `复制(${sel.size})` : '复制到…'}</button>
             <button onClick={() => menuAct('move')}>➜ {sel.size > 1 ? `移动(${sel.size})` : '移动到…'}</button>
             <button disabled={sel.size > 1} onClick={() => menuAct('rename')}>✏️ 重命名</button>
+            <div className="ctxsep" />
+            <div className="ctx-label">旋转图片</div>
+            <button onClick={() => void rotateSel(90)}>⟳ 顺时针 90°</button>
+            <button onClick={() => void rotateSel(-90)}>⟲ 逆时针 90°</button>
+            <button onClick={() => void rotateSel(180)}>⟲ 旋转 180°</button>
             <div className="ctxsep" />
             <button className="danger" onClick={() => menuAct('delete')}>🗑 {sel.size > 1 ? `删除(${sel.size})` : '删除'}</button>
           </div>

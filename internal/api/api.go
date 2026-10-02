@@ -110,6 +110,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/fs/upload", s.handleUpload)
 			r.Get("/fs/download", s.handleDownload)
 			r.Get("/fs/zip", s.handleZip)
+			r.Post("/preview/rotate", s.handleRotate)
 
 			r.Get("/trash/list", s.handleTrashList)
 			r.Post("/trash/restore", s.handleTrashRestore)
@@ -818,6 +819,58 @@ func (s *Server) requirePreviewAuth(w http.ResponseWriter, r *http.Request) bool
 		return false
 	}
 	return true
+}
+
+// handleRotate rotates one or more images (±90 / 180) and replaces the originals.
+func (s *Server) handleRotate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Scope string   `json:"scope"`
+		Paths []string `json:"paths"`
+		Angle int      `json:"angle"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if req.Scope == "" {
+		req.Scope = "me"
+	}
+	if len(req.Paths) == 0 {
+		writeErr(w, http.StatusBadRequest, "no paths")
+		return
+	}
+	if req.Angle != 90 && req.Angle != -90 && req.Angle != 180 {
+		writeErr(w, http.StatusBadRequest, "angle must be 90, -90 or 180")
+		return
+	}
+	mgr, err := s.mgrFor(req.Scope)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	results := make([]map[string]any, 0, len(req.Paths))
+	for _, p := range req.Paths {
+		res := map[string]any{"path": p}
+		abs, err := mgr.Resolve(p)
+		if err != nil {
+			res["error"] = "invalid path"
+			results = append(results, res)
+			continue
+		}
+		if !preview.CanRotate(abs) {
+			res["error"] = "unsupported format"
+			results = append(results, res)
+			continue
+		}
+		if err := preview.RotateOnDisk(abs, req.Angle); err != nil {
+			res["error"] = err.Error()
+			results = append(results, res)
+			continue
+		}
+		res["ok"] = true
+		results = append(results, res)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rotated": results})
 }
 
 // handleThumb serves a generated JPEG thumbnail for an image (with disk+memory cache).

@@ -141,3 +141,4 @@ td.namecell .type { margin-right: 6px; opacity: 0.85; }
 .ctxmenu button:disabled { opacity: 0.4; cursor: not-allowed; }
 .ctxmenu button.danger { color: var(--danger); }
 .ctxmenu .ctxsep { height: 1px; background: var(--border); margin: 4px 6px; }
+.ctxmenu .ctx-label { padding: 4px 10px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
