@@ -65,11 +65,12 @@ func (s *Service) Thumb(imagePath string, size, quality int) ([]byte, error) {
 	if quality <= 0 || quality > 100 {
 		quality = 82
 	}
-	key, err := cacheKey(imagePath)
+	pathHash := shortHash(imagePath)
+	contentHash, err := cacheKey(imagePath)
 	if err != nil {
 		return nil, err
 	}
-	key = fmt.Sprintf("thumb/%d/%d/%s.jpg", size, quality, key)
+	key := fmt.Sprintf("thumb/%s/%d/%d/%s.jpg", pathHash, size, quality, contentHash)
 
 	if b, ok := s.lru.Get(key); ok {
 		return b, nil
@@ -87,6 +88,43 @@ func (s *Service) Thumb(imagePath string, size, quality int) ([]byte, error) {
 	_ = os.WriteFile(disk, thumb, 0o644)
 	s.lru.Add(key, thumb)
 	return thumb, nil
+}
+
+// Invalidate removes every cached thumbnail for imagePath (across sizes and
+// qualities) so the next request regenerates it from the current file bytes.
+// Call it after overwriting an image (e.g. rotation).
+func (s *Service) Invalidate(imagePath string) error {
+	prefix := "thumb/" + shortHash(imagePath) + "/"
+	dir := filepath.Join(s.cacheDir, "thumb", shortHash(imagePath))
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	for _, k := range s.lru.Keys() {
+		if len(k) > len(prefix) && k[:len(prefix)] == prefix {
+			s.lru.Remove(k)
+		}
+	}
+	return nil
+}
+
+func shortHash(path string) string {
+	sum := sha256.Sum256([]byte(path))
+	return hex.EncodeToString(sum[:8])
+}
+
+// ClearAll wipes every cached thumbnail (disk + memory). Thumbnails are
+// regenerated lazily on the next request from the current file bytes, so after
+// a batch of edits/rotations you can force a full re-sync with originals.
+func (s *Service) ClearAll() error {
+	dir := filepath.Join(s.cacheDir, "thumb")
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	s.lru.Purge()
+	return nil
 }
 
 func renderThumb(imagePath string, size, quality int) ([]byte, error) {

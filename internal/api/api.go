@@ -111,6 +111,7 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/fs/download", s.handleDownload)
 			r.Get("/fs/zip", s.handleZip)
 			r.Post("/preview/rotate", s.handleRotate)
+			r.Post("/preview/clear", s.handleClearThumbs)
 
 			r.Get("/trash/list", s.handleTrashList)
 			r.Post("/trash/restore", s.handleTrashRestore)
@@ -821,6 +822,16 @@ func (s *Server) requirePreviewAuth(w http.ResponseWriter, r *http.Request) bool
 	return true
 }
 
+// handleClearThumbs wipes all cached thumbnails so they regenerate from the
+// current file bytes (re-syncs thumbnails with originals).
+func (s *Server) handleClearThumbs(w http.ResponseWriter, r *http.Request) {
+	if err := s.prev.ClearAll(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cleared"})
+}
+
 // handleRotate rotates one or more images (±90 / 180) and replaces the originals.
 func (s *Server) handleRotate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -867,6 +878,7 @@ func (s *Server) handleRotate(w http.ResponseWriter, r *http.Request) {
 			results = append(results, res)
 			continue
 		}
+		_ = s.prev.Invalidate(abs) // regenerate thumbnail from rotated bytes
 		res["ok"] = true
 		results = append(results, res)
 	}

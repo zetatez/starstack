@@ -155,6 +155,7 @@ export const api = {
       `${baseURL()}/api/preview/thumb?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}&size=${size}&q=${q}&rev=${thumbRev}&auth=${encodeURIComponent(accessToken)}`,
     rawURL: (scope: string, path: string) =>
       `${baseURL()}/api/preview/raw?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}&rev=${thumbRev}&auth=${encodeURIComponent(accessToken)}`,
+    clear: () => request('POST', '/api/preview/clear'),
     async text(scope: string, path: string): Promise<string> {
       const res = await authedFetch(`${baseURL()}/api/preview/raw?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}`);
       if (!res.ok) throw new Error('预览失败');

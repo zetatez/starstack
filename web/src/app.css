@@ -74,7 +74,7 @@ select { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
 /* up-navigation */
 .gcard.gnav { border-style: dashed; cursor: pointer; }
 .gcard.gnav:hover { border-color: var(--accent); background: rgba(76,141,255,0.06); }
-.gcard.gnav .gthumb .gicon-up { font-size: 30px; color: var(--accent); }
+.gcard.gnav .gnav-big { font-size: 30px; color: var(--muted); font-weight: 700; letter-spacing: 2px; }
 .list tbody tr.nav-row { cursor: pointer; background: rgba(76,141,255,0.04); }
 .list tbody tr.nav-row:hover { background: rgba(76,141,255,0.10); }
 

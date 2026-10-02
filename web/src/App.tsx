@@ -222,6 +222,11 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
     try { await api.rotate(scope, paths, angle); bumpThumbs(); clearSel(); refresh(); }
     catch (e) { setError((e as Error).message); }
   };
+  const clearThumbs = async () => {
+    setError('');
+    try { await api.preview.clear(); bumpThumbs(); refresh(); }
+    catch (e) { setError((e as Error).message); }
+  };
 
   return (
     <div className="sheet">
@@ -248,6 +253,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
             <button className="ghost ico" title="上传" onClick={() => fileRef.current?.click()}>⬆</button>
             <button className="ghost ico" title="新建文件夹" onClick={mkdir}>＋</button>
             <button className="ghost ico" title="刷新" onClick={refresh}>↻</button>
+            <button className="ghost ico" title="清除缩略图并重新生成" onClick={() => void clearThumbs()}>🧹</button>
             <input ref={fileRef} type="file" multiple hidden
               onChange={(e) => { if (e.target.files) void doUpload(Array.from(e.target.files)); e.target.value = ''; }} />
             <div className="spacer" />
@@ -392,9 +398,9 @@ function GridBulk(props: {
         if (i < nav.length) {
           const n = nav[i];
           return (
-            <div key={`nav-${n.key}`} className="gcard gnav" style={style} onClick={() => onNav(n.go)}>
-              <div className="gthumb"><span className="gicon-up">{n.key === 'up1' ? '↩' : '↪'}</span></div>
-              <div className="gname">{n.label}</div><div className="gmeta">{n.title}</div>
+            <div key={`nav-${n.key}`} className="gcard gnav" style={style} onClick={() => onNav(n.go)} title={n.title}>
+              <div className="gthumb gnav-big">{n.label}</div>
+              <div className="gname">{n.title}</div>
             </div>
           );
         }
