@@ -56,16 +56,20 @@ func New(opt Options) (*Service, error) {
 }
 
 // Thumb generates a JPEG thumbnail for an image file, reusing the memory or
-// disk cache when available. The thumbnail fits within a `size`x`size` box.
-func (s *Service) Thumb(imagePath string, size int) ([]byte, error) {
+// disk cache when available. The thumbnail fits within a `size`x`size` box;
+// lower `quality` (1-100) yields smaller/faster JPEG output.
+func (s *Service) Thumb(imagePath string, size, quality int) ([]byte, error) {
 	if size <= 0 {
 		size = DefaultThumbSize
+	}
+	if quality <= 0 || quality > 100 {
+		quality = 82
 	}
 	key, err := cacheKey(imagePath)
 	if err != nil {
 		return nil, err
 	}
-	key = fmt.Sprintf("thumb/%d/%s.jpg", size, key)
+	key = fmt.Sprintf("thumb/%d/%d/%s.jpg", size, quality, key)
 
 	if b, ok := s.lru.Get(key); ok {
 		return b, nil
@@ -76,7 +80,7 @@ func (s *Service) Thumb(imagePath string, size int) ([]byte, error) {
 		return b, nil
 	}
 
-	thumb, err := renderThumb(imagePath, size)
+	thumb, err := renderThumb(imagePath, size, quality)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +89,7 @@ func (s *Service) Thumb(imagePath string, size int) ([]byte, error) {
 	return thumb, nil
 }
 
-func renderThumb(imagePath string, size int) ([]byte, error) {
+func renderThumb(imagePath string, size, quality int) ([]byte, error) {
 	src, err := os.Open(imagePath)
 	if err != nil {
 		return nil, err
@@ -112,7 +116,7 @@ func renderThumb(imagePath string, size int) ([]byte, error) {
 	draw.CatmullRom.Scale(dst, dst.Bounds(), img, b, draw.Over, nil)
 
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 82}); err != nil {
+	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: quality}); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil

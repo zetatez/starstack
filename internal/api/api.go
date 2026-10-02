@@ -844,7 +844,11 @@ func (s *Server) handleThumb(w http.ResponseWriter, r *http.Request) {
 	if sz, err := strconv.Atoi(r.URL.Query().Get("size")); err == nil {
 		size = sz
 	}
-	thumb, err := s.prev.Thumb(abs, size)
+	quality := 0
+	if q, err := strconv.Atoi(r.URL.Query().Get("q")); err == nil {
+		quality = q
+	}
+	thumb, err := s.prev.Thumb(abs, size, quality)
 	if err != nil {
 		writeErr(w, http.StatusUnprocessableEntity, err.Error())
 		return

@@ -79,8 +79,9 @@ select { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
 .list tbody tr.nav-row:hover { background: rgba(76,141,255,0.10); }
 
 /* grid view */
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; padding: 14px; }
-.gcard { position: relative; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; cursor: pointer; display: flex; flex-direction: column; transition: border-color .15s; }
+.grid-v { position: relative; }
+.grid-v .gcard { position: absolute; top: 0; left: 0; }
+.gcard { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; cursor: pointer; display: flex; flex-direction: column; transition: border-color .15s; will-change: transform; }
 .gcard:hover, .gcard.gcsel { border-color: var(--accent); }
 .gcard.gcsel { background: rgba(76,141,255,0.10); }
 .gcheck { position: absolute; top: 6px; left: 6px; z-index: 2; background: var(--panel); border-radius: 5px; padding: 2px; line-height: 0; }

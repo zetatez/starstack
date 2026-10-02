@@ -41,6 +41,28 @@ export function saveBlob(blob: Blob, name: string) {
   URL.revokeObjectURL(url);
 }
 
+// Client-side LRU cache for thumbnail URLs with eviction. Virtualized grids
+// mount/unmount cells as you scroll; keeping the URL reuses the browser's HTTP
+// cache (identical URL + Cache-Control: max-age) so scrolled-back items load
+// instantly instead of re-requesting.
+const thumbLru = new Map<string, string>();
+const THUMB_LRU_MAX = 800;
+export function thumbSrc(scope: string, path: string, size: number, q = 60): string {
+  const key = `${scope}\u0000${path}\u0000${size}\u0000${q}`;
+  const hit = thumbLru.get(key);
+  if (hit) {
+    thumbLru.delete(key);
+    thumbLru.set(key, hit); // move to most-recently-used end
+    return hit;
+  }
+  const url = api.preview.thumbURL(scope, path, size, q);
+  thumbLru.set(key, url);
+  if (thumbLru.size > THUMB_LRU_MAX) {
+    thumbLru.delete(thumbLru.keys().next().value!); // evict least-recently-used
+  }
+  return url;
+}
+
 export function setTokens(a: string, r: string) { accessToken = a; refreshToken = r; }
 export function getAccess(): string { return accessToken; }
 export function getRefresh(): string { return refreshToken; }
@@ -127,8 +149,8 @@ export const api = {
   },
 
   preview: {
-    thumbURL: (scope: string, path: string, size = 96) =>
-      `${baseURL()}/api/preview/thumb?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}&size=${size}&auth=${encodeURIComponent(accessToken)}`,
+    thumbURL: (scope: string, path: string, size = 96, q = 70) =>
+      `${baseURL()}/api/preview/thumb?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}&size=${size}&q=${q}&auth=${encodeURIComponent(accessToken)}`,
     rawURL: (scope: string, path: string) =>
       `${baseURL()}/api/preview/raw?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}&auth=${encodeURIComponent(accessToken)}`,
     async text(scope: string, path: string): Promise<string> {

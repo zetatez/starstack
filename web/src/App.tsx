@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import './app.css';
-import { api, setTokens, clearTokens, getAccess, getRefresh,
+import { api, setTokens, clearTokens, getAccess, getRefresh, thumbSrc,
   type Entry, type UserInfo, type TrashItem, type Share, type UserRow } from './api';
 
 type Scope = 'me' | 'share';
@@ -92,6 +92,20 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ x: number; y: number; target: Item } | null>(null);
 
+  // Viewport tracking for the virtualized grid.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [vw, setVw] = useState({ top: 0, height: 600, width: 0 });
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const upd = () => setVw((v) => ({ ...v, top: el.scrollTop, height: el.clientHeight || 600, width: el.clientWidth || 0 }));
+    upd();
+    const ro = new ResizeObserver(upd);
+    ro.observe(el);
+    el.addEventListener('scroll', upd, { passive: true });
+    return () => { ro.disconnect(); el.removeEventListener('scroll', upd); };
+  }, []);
+
   const load = useCallback(async (sc: Scope, dir: string) => {
     setLoading(true); setError('');
     try { const res = await api.list(sc, dir); setItems(res.entries.map((e) => ({ ...e, full: joinDir(dir, e.name) }))); }
@@ -130,6 +144,11 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
   const grandPath = upPath(cwd, 2);
   const showUp = parentPath !== cwd;
   const showUp2 = parentPath !== cwd && grandPath !== parentPath;
+
+  interface NavItem { key: string; label: string; title: string; go: string }
+  const nav: NavItem[] = [];
+  if (showUp) nav.push({ key: 'up1', label: '..', title: '上一级', go: parentPath });
+  if (showUp2) nav.push({ key: 'up2', label: '...', title: '上两级', go: grandPath });
 
   // ---- multi-select ----
   const toggleSel = (full: string) => setSel((prev) => {
@@ -255,41 +274,16 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
             ))}
           </div>
           {error && <div className="banner err">{error}</div>}
-          <div className={`body${drag ? ' drag' : ''}`}
+          <div ref={bodyRef} className={`body${drag ? ' drag' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
             onDragLeave={() => setDrag(false)}
             onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files) void doUpload(Array.from(e.dataTransfer.files)); }}>
-            {loading ? <p className="muted pad">加载中…</p> : visible.length === 0 ? <p className="muted pad">空目录 — 拖拽文件到此处上传{items.length ? '（隐藏文件已过滤，点“隐藏文件”可显示）' : ''}</p> : view === 'grid' ? (
-              <div className="grid">
-                {showUp && (
-                  <div className="gcard gnav" title="上一级" onClick={() => go(parentPath)}>
-                    <div className="gthumb"><span className="gicon-up">↩</span></div>
-                    <div className="gname">..</div><div className="gmeta">上一级</div>
-                  </div>
-                )}
-                {showUp2 && (
-                  <div className="gcard gnav" title="上两级" onClick={() => go(grandPath)}>
-                    <div className="gthumb"><span className="gicon-up">↪</span></div>
-                    <div className="gname">...</div><div className="gmeta">上两级</div>
-                  </div>
-                )}
-                {visible.map((it) => (
-                  <div key={it.full} className={`gcard${it.name.startsWith('.') ? ' ghidden' : ''}${sel.has(it.full) ? ' gcsel' : ''}`}
-                    onClick={() => toggleSel(it.full)} onDoubleClick={() => openItem(it)} onContextMenu={(e) => openMenu(e, it)}>
-                    <span className="gcheck" onClick={(e) => { e.stopPropagation(); toggleSel(it.full); }}>
-                      <input type="checkbox" checked={sel.has(it.full)} onChange={() => toggleSel(it.full)} />
-                    </span>
-                    <div className="gthumb">
-                      {it.is_dir ? <span className="gico folder">📁</span>
-                        : isImage(it.name) ? <img className="gimg" src={api.preview.thumbURL(scope, it.full, 256)} loading="lazy" alt={it.name} />
-                        : <span className="gico file">📄</span>}
-                    </div>
-                    <div className="gname" title={it.full}>{it.name}</div>
-                    <div className="gmeta">{it.is_dir ? '文件夹' : fmtSize(it.size)}</div>
-                  </div>
-                ))}
-              </div>
-            ) : (
+            {loading ? <p className="muted pad">加载中…</p> : visible.length === 0 ? <p className="muted pad">空目录 — 拖拽文件到此处上传{items.length ? '（隐藏文件已过滤，点“隐藏文件”可显示）' : ''}</p> : view === 'grid' ? <GridBulk
+              items={visible} nav={nav}
+              cols={vw.width ? Math.max(1, Math.floor((vw.width + 14) / 186)) : 4}
+              top={vw.top} height={vw.height}
+              scope={scope} sel={sel} isImage={isImage}
+              onToggle={toggleSel} onOpen={openItem} onMenu={openMenu} onNav={go} /> : (
               <table className="list">
                 <thead><tr>
                   <th className="chk"><input type="checkbox" title="全选/取消" checked={allSel} onChange={toggleAll} /></th>
@@ -354,6 +348,61 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
       )}
 
       {preview && <PreviewModal item={preview} scope={scope} onClose={() => setPreview(null)} />}
+    </div>
+  );
+}
+
+const CARD_W = 172, GAP = 14, ROW_H = 196;
+
+/** Virtualized grid: only renders cells within the viewport (+overscan). */
+function GridBulk(props: {
+  items: Item[]; nav: { key: string; label: string; title: string; go: string }[];
+  cols: number; top: number; height: number; scope: Scope; sel: Set<string>;
+  isImage: (n: string) => boolean;
+  onToggle: (full: string) => void; onOpen: (it: Item) => void;
+  onMenu: (e: React.MouseEvent, it: Item) => void; onNav: (dir: string) => void;
+}) {
+  const { items, nav, cols, top, height, scope, sel, isImage, onToggle, onOpen, onMenu, onNav } = props;
+  const totCells = nav.length + items.length;
+  const startIdx = Math.max(0, Math.floor((top - ROW_H) / ROW_H) * cols);   // one row overscan
+  const endIdx = Math.min(totCells, Math.ceil((top + height + ROW_H) / ROW_H) * cols);
+  const rows = Math.ceil(totCells / cols);
+  const cells: number[] = [];
+  for (let i = startIdx; i < endIdx; i++) cells.push(i);
+
+  return (
+    <div className="grid-v" style={{ height: rows * ROW_H + 12 }}>
+      {cells.map((i) => {
+        const r = Math.floor(i / cols), c = i % cols;
+        const style: React.CSSProperties = { width: CARD_W, height: ROW_H - GAP, transform: `translate(${c * (CARD_W + GAP)}px, ${r * ROW_H}px)` };
+        if (i < nav.length) {
+          const n = nav[i];
+          return (
+            <div key={`nav-${n.key}`} className="gcard gnav" style={style} onClick={() => onNav(n.go)}>
+              <div className="gthumb"><span className="gicon-up">{n.key === 'up1' ? '↩' : '↪'}</span></div>
+              <div className="gname">{n.label}</div><div className="gmeta">{n.title}</div>
+            </div>
+          );
+        }
+        const it = items[i - nav.length];
+        const isImg = isImage(it.name);
+        return (
+          <div key={it.full} style={style}
+            className={`gcard${it.name.startsWith('.') ? ' ghidden' : ''}${sel.has(it.full) ? ' gcsel' : ''}`}
+            onClick={() => onToggle(it.full)} onDoubleClick={() => onOpen(it)} onContextMenu={(e) => onMenu(e, it)}>
+            <span className="gcheck" onClick={(e) => { e.stopPropagation(); onToggle(it.full); }}>
+              <input type="checkbox" checked={sel.has(it.full)} onChange={() => onToggle(it.full)} />
+            </span>
+            <div className="gthumb">
+              {it.is_dir ? <span className="gico folder">📁</span>
+                : isImg ? <img className="gimg" src={thumbSrc(scope, it.full, 200, 60)} loading="lazy" alt={it.name} />
+                : <span className="gico file">📄</span>}
+            </div>
+            <div className="gname" title={it.full}>{it.name}</div>
+            <div className="gmeta">{it.is_dir ? '文件夹' : fmtSize(it.size)}</div>
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -38,7 +38,7 @@ func TestThumbGeneratesAndCaches(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b1, err := svc.Thumb(p, 64)
+	b1, err := svc.Thumb(p, 64, 82)
 	if err != nil {
 		t.Fatalf("thumb: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestThumbGeneratesAndCaches(t *testing.T) {
 		t.Errorf("not a JPEG: %x", b1[:2])
 	}
 	// Second call should hit cache and return identical bytes.
-	b2, err := svc.Thumb(p, 64)
+	b2, err := svc.Thumb(p, 64, 82)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,12 +54,24 @@ func TestThumbGeneratesAndCaches(t *testing.T) {
 		t.Errorf("cached thumbnail differs")
 	}
 	// Different size should produce a separate (valid) thumbnail.
-	b3, err := svc.Thumb(p, 128)
+	b3, err := svc.Thumb(p, 128, 82)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Equal(b1, b3) {
 		t.Errorf("thumbnails of different sizes should differ")
+	}
+	// Lower quality output should be smaller than high quality for a large image.
+	small, err := svc.Thumb(p, 96, 40)
+	if err != nil {
+		t.Fatal(err)
+	}
+	big, err := svc.Thumb(p, 96, 95)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(small) >= len(big) {
+		t.Errorf("lower-quality thumbnail should be smaller: low=%d high=%d", len(small), len(big))
 	}
 }
 
