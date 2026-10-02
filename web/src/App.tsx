@@ -193,30 +193,49 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
   const openMenu = (e: React.MouseEvent, it: Item) => {
     e.preventDefault();
     e.stopPropagation();
-    if (!sel.has(it.full)) setSel(new Set([it.full])); // right-click selects the item
     setMenu({ x: e.clientX, y: e.clientY, target: it });
   };
+  // Right-click no longer changes selection: the menu acts on the clicked
+  // item — or on the whole current selection when that item is part of it.
   const menuAct = (action: 'preview' | 'download' | 'copy' | 'move' | 'rename' | 'delete') => {
     if (!menu) return;
     const target = menu.target;
     setMenu(null);
-    const multi = sel.size > 1;
+    const targets: Set<string> = sel.has(target.full) ? sel : new Set([target.full]);
+    const multi = targets.size > 1;
     if (action === 'preview') { setPreview(target); return; }
     if (action === 'rename') { void rename(target); return; }
     if (action === 'download') {
-      if (multi || target.is_dir) { void api.zipDownload(scope, [...sel]).catch((e) => setError((e as Error).message)); }
+      if (multi || target.is_dir) { void api.zipDownload(scope, [...targets]).catch((e) => setError((e as Error).message)); }
       else void api.downloadBlob(scope, target.full, target.name).catch(() => setError('下载失败'));
       return;
     }
-    // bulk ops over the current selection
-    if (action === 'copy') return void batch.copy();
-    if (action === 'move') return void batch.move();
-    if (action === 'delete') return void batch.del();
+    const mut = async (fn: (p: string) => Promise<unknown>) => {
+      setError('');
+      for (const p of targets) { try { await fn(p); } catch (e) { setError((e as Error).message); } }
+      refresh();
+    };
+    if (action === 'copy') {
+      const dest = prompt(`复制 ${targets.size} 项到目录（绝对路径）`, '/');
+      if (!dest) return;
+      return void mut((p) => api.copy(scope, p, dest));
+    }
+    if (action === 'move') {
+      const dest = prompt(`移动 ${targets.size} 项到目录（绝对路径）`, '/');
+      if (!dest) return;
+      return void mut((p) => api.move(scope, p, dest));
+    }
+    if (action === 'delete') {
+      if (!confirm(`删除选中的 ${targets.size} 项？（进回收站）`)) return;
+      return void mut((p) => api.remove(scope, p));
+    }
   };
   const rotateSel = async (angle: number) => {
-    if (!sel.size) return;
+    if (!menu) return;
+    const target = menu.target;
     setMenu(null);
-    const paths = [...sel].filter((p) => PREVIEW_IMAGE.test(p));
+    const targets: Set<string> = sel.has(target.full) ? sel : new Set([target.full]);
+    const paths = [...targets].filter((p) => PREVIEW_IMAGE.test(p));
     if (!paths.length) { setError('所选项目中没有可旋转的图片'); return; }
     setError('');
     try { await api.rotate(scope, paths, angle); bumpThumbs(); clearSel(); refresh(); }
@@ -322,8 +341,8 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
                   {visible.map((it) => (
                     <tr key={it.full}
                         className={`${it.name.startsWith('.') ? 'ghidden ' : ''}${sel.has(it.full) ? 'sel' : ''}`}
-                        onClick={() => toggleSel(it.full)} onContextMenu={(e) => openMenu(e, it)}>
-                      <td className="chk" onClick={(e) => e.stopPropagation()}>
+                        onClick={() => openItem(it)} onContextMenu={(e) => openMenu(e, it)}>
+                      <td className="chk" onClick={(e) => { e.stopPropagation(); toggleSel(it.full); }} title="点击选择/取消选择">
                         <input className="row-chk" type="checkbox" checked={sel.has(it.full)} onChange={() => toggleSel(it.full)} onClick={(e) => e.stopPropagation()} />
                       </td>
                       <td className="namecell" onClick={(e) => e.stopPropagation()}>
@@ -345,27 +364,30 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
       {tab === 'share' && <SharesPage />}
       {tab === 'admin' && user.is_admin && <AdminPage />}
 
-      {menu && (
+      {menu && (() => {
+          const menuN = sel.has(menu.target.full) ? sel.size : 1;
+          return (
         <>
           <div className="menu-bg" onMouseDown={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
           <div className="ctxmenu" style={{ left: menu.x, top: menu.y }}>
-            <div className="ctx-title">{menu.target.is_dir ? '📁' : '📄'} {menu.target.name}{sel.size > 1 ? `  (+${sel.size - 1})` : ''}</div>
-            <button disabled={menu.target.is_dir || sel.size > 1 || !canPreview(menu.target.name)} onClick={() => menuAct('preview')}>👁 预览</button>
-            <button onClick={() => menuAct('download')}>⬇ {sel.size > 1 ? `打包下载(${sel.size})` : '下载'}</button>
+            <div className="ctx-title">{menu.target.is_dir ? '📁' : '📄'} {menu.target.name}{menuN > 1 ? `  (+${menuN - 1})` : ''}</div>
+            <button disabled={menu.target.is_dir || menuN > 1 || !canPreview(menu.target.name)} onClick={() => menuAct('preview')}>👁 预览</button>
+            <button onClick={() => menuAct('download')}>⬇ {menuN > 1 ? `打包下载(${menuN})` : '下载'}</button>
             <div className="ctxsep" />
-            <button onClick={() => menuAct('copy')}>📋 {sel.size > 1 ? `复制(${sel.size})` : '复制到…'}</button>
-            <button onClick={() => menuAct('move')}>➜ {sel.size > 1 ? `移动(${sel.size})` : '移动到…'}</button>
-            <button disabled={sel.size > 1} onClick={() => menuAct('rename')}>✏️ 重命名</button>
+            <button onClick={() => menuAct('copy')}>📋 {menuN > 1 ? `复制(${menuN})` : '复制到…'}</button>
+            <button onClick={() => menuAct('move')}>➜ {menuN > 1 ? `移动(${menuN})` : '移动到…'}</button>
+            <button disabled={menuN > 1} onClick={() => menuAct('rename')}>✏️ 重命名</button>
             <div className="ctxsep" />
             <div className="ctx-label">旋转图片</div>
             <button onClick={() => void rotateSel(90)}>⟳ 顺时针 90°</button>
             <button onClick={() => void rotateSel(-90)}>⟲ 逆时针 90°</button>
             <button onClick={() => void rotateSel(180)}>⟲ 旋转 180°</button>
             <div className="ctxsep" />
-            <button className="danger" onClick={() => menuAct('delete')}>🗑 {sel.size > 1 ? `删除(${sel.size})` : '删除'}</button>
+            <button className="danger" onClick={() => menuAct('delete')}>🗑 {menuN > 1 ? `删除(${menuN})` : '删除'}</button>
           </div>
         </>
-      )}
+          );
+        })()}
 
       {preview && <PreviewModal item={preview} scope={scope} onClose={() => setPreview(null)} />}
     </div>
@@ -408,9 +430,9 @@ function GridBulk(props: {
         return (
           <div key={it.full} style={style}
             className={`gcard${it.name.startsWith('.') ? ' ghidden' : ''}${sel.has(it.full) ? ' gcsel' : ''}`}
-            onClick={() => onToggle(it.full)} onContextMenu={(e) => onMenu(e, it)}>
-            <span className="gcheck" onClick={(e) => { e.stopPropagation(); onToggle(it.full); }}>
-              <input type="checkbox" checked={sel.has(it.full)} onChange={() => onToggle(it.full)} />
+            onClick={() => onOpen(it)} onContextMenu={(e) => onMenu(e, it)}>
+            <span className="gcheck" onClick={(e) => { e.stopPropagation(); onToggle(it.full); }} title="点击选择/取消选择">
+              <input type="checkbox" checked={sel.has(it.full)} onChange={() => onToggle(it.full)} onClick={(e) => e.stopPropagation()} />
             </span>
             <div className="gthumb">
               {it.is_dir ? <span className="gico folder">📁</span>
