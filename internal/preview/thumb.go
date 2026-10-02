@@ -11,7 +11,6 @@ import (
 	"image"
 	"image/jpeg"
 	_ "image/png"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,11 +65,14 @@ func (s *Service) Thumb(imagePath string, size, quality int) ([]byte, error) {
 		quality = 82
 	}
 	pathHash := shortHash(imagePath)
-	contentHash, err := cacheKey(imagePath)
+	fi, err := os.Stat(imagePath)
 	if err != nil {
 		return nil, err
 	}
-	key := fmt.Sprintf("thumb/%s/%d/%d/%s.jpg", pathHash, size, quality, contentHash)
+	// Cheap metadata key (mtime + size): fetching cache hits costs one stat,
+	// not a full read of the source image for hashing.
+	contentRef := fmt.Sprintf("%d_%d", fi.ModTime().UnixNano(), fi.Size())
+	key := fmt.Sprintf("thumb/%s/%s/%d/%d.jpg", pathHash, contentRef, size, quality)
 
 	if b, ok := s.lru.Get(key); ok {
 		return b, nil
@@ -154,27 +156,15 @@ func renderThumb(imagePath string, size, quality int) ([]byte, error) {
 	dh := max(1, int(float64(h)*scale))
 
 	dst := image.NewRGBA(image.Rect(0, 0, dw, dh))
-	draw.CatmullRom.Scale(dst, dst.Bounds(), img, b, draw.Over, nil)
+	// ApproxBiLinear is much faster than CatmullRom; visually equivalent at
+	// thumbnail sizes.
+	draw.ApproxBiLinear.Scale(dst, dst.Bounds(), img, b, draw.Over, nil)
 
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: quality}); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-// cacheKey is a content hash so edited files regenerate thumbnails.
-func cacheKey(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // SupportedImage reports whether an extension can be previewed as an image.
