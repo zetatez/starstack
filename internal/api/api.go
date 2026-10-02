@@ -85,6 +85,11 @@ func (s *Server) Routes() http.Handler {
 		// Board controls (used to avoid duplicating users)
 		r.Get("/users/first", s.handleFirstUser)
 
+		// Preview resources self-authenticate (accept token via header OR ?auth=
+		// query param) because <img>/<video>/<iframe> cannot send headers.
+		r.Get("/preview/thumb", s.handleThumb)
+		r.Get("/preview/raw", s.handlePreviewRaw)
+
 		// Authenticated
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAuth)
@@ -110,9 +115,6 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/trash/restore", s.handleTrashRestore)
 			r.Post("/trash/purge", s.handleTrashPurge)
 			r.Post("/trash/empty", s.handleTrashEmpty)
-
-			r.Get("/preview/thumb", s.handleThumb)
-			r.Get("/preview/raw", s.handlePreviewRaw)
 
 			r.Get("/share/list", s.handleListShares)
 			r.Post("/share", s.handleCreateShare)
@@ -799,8 +801,30 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, name, st.ModTime(), file)
 }
 
+// requirePreviewAuth authenticates via Authorization header OR the `auth`
+// query param (needed for <img>/<video>/<iframe>, which cannot set headers).
+func (s *Server) requirePreviewAuth(w http.ResponseWriter, r *http.Request) bool {
+	ah := r.Header.Get("Authorization")
+	tok := strings.TrimPrefix(ah, "Bearer ")
+	if tok == "" || tok == ah {
+		tok = r.URL.Query().Get("auth")
+	}
+	if tok == "" {
+		writeErr(w, http.StatusUnauthorized, "missing token")
+		return false
+	}
+	if _, err := s.auth.ParseAccessToken(tok); err != nil {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	return true
+}
+
 // handleThumb serves a generated JPEG thumbnail for an image (with disk+memory cache).
 func (s *Server) handleThumb(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePreviewAuth(w, r) {
+		return
+	}
 	scope, virtual, _ := s.fileParams(r)
 	mgr, err := s.mgrFor(scope)
 	if err != nil {
@@ -834,6 +858,9 @@ func (s *Server) handleThumb(w http.ResponseWriter, r *http.Request) {
 // handlePreviewRaw streams a file inline (no attachment disposition) so
 // browsers can embed images, audio, video and PDFs. Supports HTTP Range.
 func (s *Server) handlePreviewRaw(w http.ResponseWriter, r *http.Request) {
+	if !s.requirePreviewAuth(w, r) {
+		return
+	}
 	scope, virtual, _ := s.fileParams(r)
 	mgr, err := s.mgrFor(scope)
 	if err != nil {
