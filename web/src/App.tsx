@@ -90,6 +90,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
   const [view, setView] = useState<'list' | 'grid'>('list');
   const [showHidden, setShowHidden] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
+  const [menu, setMenu] = useState<{ x: number; y: number; target: Item } | null>(null);
 
   const load = useCallback(async (sc: Scope, dir: string) => {
     setLoading(true); setError('');
@@ -99,7 +100,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
 
   useEffect(() => { if (tab === 'files') void load(scope, cwd); }, [scope, cwd, tab, load]);
 
-  const go = (dir: string) => { setCwd(dir); setSel(new Set()); };
+  const go = (dir: string) => { setCwd(dir); setSel(new Set()); setMenu(null); };
   const refresh = () => void load(scope, cwd);
 
   const doUpload = async (files: File[]) => {
@@ -119,22 +120,9 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
     const name = prompt('新的名称', it.name);
     if (name && name !== it.name) { try { await api.rename(scope, it.full, name); refresh(); } catch (ex) { setError((ex as Error).message); } }
   };
-  const move = async (it: Item) => {
-    const dest = prompt('目标目录（绝对路径，如 /docs 或 /）', '/');
-    if (dest) { try { await api.move(scope, it.full, dest); refresh(); } catch (ex) { setError((ex as Error).message); } }
-  };
-  const del = async (it: Item) => {
-    if (!confirm(`删除 ${it.name} ？（进入回收站，可恢复）`)) return;
-    try { await api.remove(scope, it.full); refresh(); } catch (ex) { setError((ex as Error).message); }
-  };
-  const copyOne = async (it: Item) => {
-    const dest = prompt(`复制 ${it.name} 到目录（绝对路径）`, '/');
-    if (!dest) return;
-    try { await api.copy(scope, it.full, dest); refresh(); } catch (ex) { setError((ex as Error).message); }
-  };
+  const canPreview = (n: string) => PREVIEW_IMAGE.test(n) || PREVIEW_VIDEO.test(n) || PREVIEW_AUDIO.test(n) || PREVIEW_PDF.test(n) || PREVIEW_TEXT.test(n);
   const openItem = (it: Item) => { if (it.is_dir) go(it.full); else setPreview(it); };
 
-  const canPreview = (n: string) => PREVIEW_IMAGE.test(n) || PREVIEW_VIDEO.test(n) || PREVIEW_AUDIO.test(n) || PREVIEW_PDF.test(n) || PREVIEW_TEXT.test(n);
   const isImage = (n: string) => PREVIEW_IMAGE.test(n);
   const trail = cwd.split('/').filter(Boolean);
   const visible = showHidden ? items : items.filter((it) => !it.name.startsWith('.'));
@@ -180,6 +168,31 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
       for (const p of sel) { try { await api.remove(scope, p); } catch (e) { setError((e as Error).message); } }
       clearSel(); refresh();
     },
+  };
+
+  // ---- right-click context menu ----
+  const openMenu = (e: React.MouseEvent, it: Item) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!sel.has(it.full)) setSel(new Set([it.full])); // right-click selects the item
+    setMenu({ x: e.clientX, y: e.clientY, target: it });
+  };
+  const menuAct = (action: 'preview' | 'download' | 'copy' | 'move' | 'rename' | 'delete') => {
+    if (!menu) return;
+    const target = menu.target;
+    setMenu(null);
+    const multi = sel.size > 1;
+    if (action === 'preview') { setPreview(target); return; }
+    if (action === 'rename') { void rename(target); return; }
+    if (action === 'download') {
+      if (multi || target.is_dir) { void api.zipDownload(scope, [...sel]).catch((e) => setError((e as Error).message)); }
+      else void api.downloadBlob(scope, target.full, target.name).catch(() => setError('下载失败'));
+      return;
+    }
+    // bulk ops over the current selection
+    if (action === 'copy') return void batch.copy();
+    if (action === 'move') return void batch.move();
+    if (action === 'delete') return void batch.del();
   };
 
   return (
@@ -261,7 +274,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
                 )}
                 {visible.map((it) => (
                   <div key={it.full} className={`gcard${it.name.startsWith('.') ? ' ghidden' : ''}${sel.has(it.full) ? ' gcsel' : ''}`}
-                    onClick={() => toggleSel(it.full)} onDoubleClick={() => openItem(it)}>
+                    onClick={() => toggleSel(it.full)} onDoubleClick={() => openItem(it)} onContextMenu={(e) => openMenu(e, it)}>
                     <span className="gcheck" onClick={(e) => { e.stopPropagation(); toggleSel(it.full); }}>
                       <input type="checkbox" checked={sel.has(it.full)} onChange={() => toggleSel(it.full)} />
                     </span>
@@ -272,16 +285,6 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
                     </div>
                     <div className="gname" title={it.full}>{it.name}</div>
                     <div className="gmeta">{it.is_dir ? '文件夹' : fmtSize(it.size)}</div>
-                    <div className="gactions">
-                      {!it.is_dir && <>
-                        {canPreview(it.name) && <button title="预览" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); setPreview(it); }}>👁</button>}
-                        <button title="下载" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void api.downloadBlob(scope, it.full, it.name).catch(() => setError('下载失败')); }}>⬇</button>
-                      </>}
-                      <button title="复制" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void copyOne(it); }}>📋</button>
-                      <button title="重命名" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void rename(it); }}>✏️</button>
-                      <button title="移动" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void move(it); }}>➜</button>
-                      <button title="删除" className="ghost sm ico danger" onClick={(e) => { e.stopPropagation(); void del(it); }}>🗑</button>
-                    </div>
                   </div>
                 ))}
               </div>
@@ -289,27 +292,27 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
               <table className="list">
                 <thead><tr>
                   <th className="chk"><input type="checkbox" title="全选/取消" checked={allSel} onChange={toggleAll} /></th>
-                  <th>名称</th><th>大小</th><th>修改时间</th><th>操作</th>
+                  <th>名称</th><th>大小</th><th>修改时间</th>
                 </tr></thead>
                 <tbody>
                   {showUp && (
                     <tr className="nav-row" onClick={() => go(parentPath)}>
                       <td className="chk"></td>
                       <td>📁 <button className="link" onClick={(e) => { e.stopPropagation(); go(parentPath); }}>..</button></td>
-                      <td>—</td><td>上一级</td><td></td>
+                      <td>—</td><td>上一级</td>
                     </tr>
                   )}
                   {showUp2 && (
                     <tr className="nav-row" onClick={() => go(grandPath)}>
                       <td className="chk"></td>
                       <td>📁 <button className="link" onClick={(e) => { e.stopPropagation(); go(grandPath); }}>...</button></td>
-                      <td>—</td><td>上两级</td><td></td>
+                      <td>—</td><td>上两级</td>
                     </tr>
                   )}
                   {visible.map((it) => (
                     <tr key={it.full}
                         className={`${it.name.startsWith('.') ? 'ghidden ' : ''}${sel.has(it.full) ? 'sel' : ''}`}
-                        onClick={() => toggleSel(it.full)} onDoubleClick={() => openItem(it)}>
+                        onClick={() => toggleSel(it.full)} onDoubleClick={() => openItem(it)} onContextMenu={(e) => openMenu(e, it)}>
                       <td className="chk">
                         {it.is_dir ? '📁' : '📄'}
                         <input className="row-chk" type="checkbox" checked={sel.has(it.full)} onChange={() => toggleSel(it.full)} onClick={(e) => e.stopPropagation()} />
@@ -317,16 +320,6 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
                       <td><button className="link" onClick={(e) => { e.stopPropagation(); openItem(it); }}>{it.name}</button></td>
                       <td>{it.is_dir ? '—' : fmtSize(it.size)}</td>
                       <td>{new Date(it.mtime).toLocaleString()}</td>
-                      <td className="actions">
-                        {!it.is_dir && <>
-                          {canPreview(it.name) && <button title="预览" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); setPreview(it); }}>👁</button>}
-                          <button title="下载" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void api.downloadBlob(scope, it.full, it.name).catch(() => setError('下载失败')); }}>⬇</button>
-                        </>}
-                        <button title="复制" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void copyOne(it); }}>📋</button>
-                        <button title="重命名" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void rename(it); }}>✏️</button>
-                        <button title="移动" className="ghost sm ico" onClick={(e) => { e.stopPropagation(); void move(it); }}>➜</button>
-                        <button title="删除" className="ghost sm ico danger" onClick={(e) => { e.stopPropagation(); void del(it); }}>🗑</button>
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -339,6 +332,23 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
       {tab === 'trash' && <TrashPage />}
       {tab === 'share' && <SharesPage />}
       {tab === 'admin' && user.is_admin && <AdminPage />}
+
+      {menu && (
+        <>
+          <div className="menu-bg" onMouseDown={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
+          <div className="ctxmenu" style={{ left: menu.x, top: menu.y }}>
+            <div className="ctx-title">{menu.target.is_dir ? '📁' : '📄'} {menu.target.name}{sel.size > 1 ? `  (+${sel.size - 1})` : ''}</div>
+            <button disabled={menu.target.is_dir || sel.size > 1 || !canPreview(menu.target.name)} onClick={() => menuAct('preview')}>👁 预览</button>
+            <button onClick={() => menuAct('download')}>⬇ {sel.size > 1 ? `打包下载(${sel.size})` : '下载'}</button>
+            <div className="ctxsep" />
+            <button onClick={() => menuAct('copy')}>📋 {sel.size > 1 ? `复制(${sel.size})` : '复制到…'}</button>
+            <button onClick={() => menuAct('move')}>➜ {sel.size > 1 ? `移动(${sel.size})` : '移动到…'}</button>
+            <button disabled={sel.size > 1} onClick={() => menuAct('rename')}>✏️ 重命名</button>
+            <div className="ctxsep" />
+            <button className="danger" onClick={() => menuAct('delete')}>🗑 {sel.size > 1 ? `删除(${sel.size})` : '删除'}</button>
+          </div>
+        </>
+      )}
 
       {preview && <PreviewModal item={preview} scope={scope} onClose={() => setPreview(null)} />}
     </div>
