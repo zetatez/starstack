@@ -99,6 +99,7 @@ export interface TrashItem {
 export interface Share {
   id: number;
   token: string;
+  scope: string;
   path: string;
   expires_at: string;
   allow_down: boolean;
@@ -158,7 +159,7 @@ export const api = {
     clear: () => request('POST', '/api/preview/clear'),
     async text(scope: string, path: string): Promise<string> {
       const res = await authedFetch(`${baseURL()}/api/preview/raw?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}`);
-      if (!res.ok) throw new Error('预览失败');
+      if (!res.ok) throw new Error('Preview failed');
       return res.text();
     },
   },
@@ -198,7 +199,7 @@ export const api = {
 
   async downloadBlob(scope: string, path: string, name: string): Promise<void> {
     const res = await authedFetch(`${baseURL()}/api/fs/download?scope=${encodeURIComponent(scope)}&path=${encodeURIComponent(path)}`);
-    if (!res.ok) throw new Error('下载失败');
+    if (!res.ok) throw new Error('Download failed');
     return saveBlob(await res.blob(), name);
   },
   /** Download multiple paths as a single zip archive. */

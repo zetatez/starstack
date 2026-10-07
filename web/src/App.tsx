@@ -66,12 +66,12 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
     <div className="login-wrap">
       <form className="card login" onSubmit={submit}>
         <h1>StarStack</h1>
-        <p className="muted">本地私有云盘</p>
-        <input value={u} onChange={(e) => setU(e.target.value)} placeholder="用户名" autoFocus />
-        <input value={p} onChange={(e) => setP(e.target.value)} placeholder="密码" type="password" />
+        <p className="muted">Your private cloud drive</p>
+        <input value={u} onChange={(e) => setU(e.target.value)} placeholder="Username" autoFocus />
+        <input value={p} onChange={(e) => setP(e.target.value)} placeholder="Password" type="password" />
         {err && <p className="err">{err}</p>}
-        <button disabled={busy || !u || !p}>{busy ? '登录中…' : '登录'}</button>
-        <p className="tip">首个注册的用户自动成为管理员</p>
+        <button disabled={busy || !u || !p}>{busy ? 'Signing in…' : 'Sign in'}</button>
+        <p className="tip">The first registered account becomes the admin</p>
       </form>
     </div>
   );
@@ -92,6 +92,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
   const [showHidden, setShowHidden] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ x: number; y: number; target: Item } | null>(null);
+  const [shareInfo, setShareInfo] = useState('');
 
   // Viewport tracking for the virtualized grid.
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -122,17 +123,17 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
     if (!files.length) return; setError('');
     try {
       const res = await api.upload(scope, cwd, Array.from(files));
-      res.uploaded.forEach((r) => { if (!r.ok) setError(`上传失败: ${r.name} ${r.error ?? ''}`); });
+      res.uploaded.forEach((r) => { if (!r.ok) setError(`Upload failed: ${r.name} ${r.error ?? ''}`); });
       refresh();
     } catch (ex) { setError((ex as Error).message); }
   };
 
   const mkdir = async () => {
-    const name = prompt('文件夹名称'); if (!name) return;
+    const name = prompt('Folder name'); if (!name) return;
     try { await api.mkdir(scope, joinDir(cwd, name)); refresh(); } catch (ex) { setError((ex as Error).message); }
   };
   const rename = async (it: Item) => {
-    const name = prompt('新的名称', it.name);
+    const name = prompt('New name', it.name);
     if (name && name !== it.name) { try { await api.rename(scope, it.full, name); refresh(); } catch (ex) { setError((ex as Error).message); } }
   };
   const canPreview = (n: string) => PREVIEW_IMAGE.test(n) || PREVIEW_VIDEO.test(n) || PREVIEW_AUDIO.test(n) || PREVIEW_PDF.test(n) || PREVIEW_TEXT.test(n);
@@ -154,8 +155,8 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
 
   interface NavItem { key: string; label: string; title: string; go: string }
   const nav: NavItem[] = [];
-  if (showUp2) nav.push({ key: 'up2', label: '...', title: '上两级', go: grandPath });
-  if (showUp) nav.push({ key: 'up1', label: '..', title: '上一级', go: parentPath });
+  if (showUp2) nav.push({ key: 'up2', label: '...', title: 'Go up two levels', go: grandPath });
+  if (showUp) nav.push({ key: 'up1', label: '..', title: 'Go up one level', go: parentPath });
 
   // ---- multi-select ----
   const toggleSel = (full: string) => setSel((prev) => {
@@ -173,7 +174,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
     },
     copy: async () => {
       if (!sel.size) return;
-      const dest = prompt(`复制选中的 ${sel.size} 项到目录（绝对路径）`, '/');
+      const dest = prompt(`Copy ${sel.size} selected item(s) to directory (absolute path)`, '/');
       if (!dest) return;
       setError('');
       for (const p of sel) { try { await api.copy(scope, p, dest); } catch (e) { setError((e as Error).message); } }
@@ -181,7 +182,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
     },
     move: async () => {
       if (!sel.size) return;
-      const dest = prompt(`移动选中的 ${sel.size} 项到目录（绝对路径）`, '/');
+      const dest = prompt(`Move ${sel.size} selected item(s) to directory (absolute path)`, '/');
       if (!dest) return;
       setError('');
       for (const p of sel) { try { await api.move(scope, p, dest); } catch (e) { setError((e as Error).message); } }
@@ -189,7 +190,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
     },
     del: async () => {
       if (!sel.size) return;
-      if (!confirm(`删除选中的 ${sel.size} 项？（进回收站）`)) return;
+      if (!confirm(`Delete the ${sel.size} selected item(s)? (moved to trash)`)) return;
       setError('');
       for (const p of sel) { try { await api.remove(scope, p); } catch (e) { setError((e as Error).message); } }
       clearSel(); refresh();
@@ -204,7 +205,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
   };
   // Right-click no longer changes selection: the menu acts on the clicked
   // item — or on the whole current selection when that item is part of it.
-  const menuAct = (action: 'preview' | 'download' | 'copy' | 'move' | 'rename' | 'delete') => {
+  const menuAct = (action: 'preview' | 'download' | 'share' | 'copy' | 'move' | 'rename' | 'delete') => {
     if (!menu) return;
     const target = menu.target;
     setMenu(null);
@@ -212,9 +213,16 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
     const multi = targets.size > 1;
     if (action === 'preview') { setPreview(target); return; }
     if (action === 'rename') { void rename(target); return; }
+    if (action === 'share') {
+      setError('');
+      void api.share.create({ scope, path: target.full, allow_down: true })
+        .then(({ token }) => setShareInfo(`${location.origin}/api/share/${token}/list`))
+        .catch((e) => setError((e as Error).message));
+      return;
+    }
     if (action === 'download') {
       if (multi || target.is_dir) { void api.zipDownload(scope, [...targets]).catch((e) => setError((e as Error).message)); }
-      else void api.downloadBlob(scope, target.full, target.name).catch(() => setError('下载失败'));
+      else void api.downloadBlob(scope, target.full, target.name).catch(() => setError('Download failed'));
       return;
     }
     const mut = async (fn: (p: string) => Promise<unknown>) => {
@@ -223,17 +231,17 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
       refresh();
     };
     if (action === 'copy') {
-      const dest = prompt(`复制 ${targets.size} 项到目录（绝对路径）`, '/');
+      const dest = prompt(`Copy ${targets.size} item(s) to directory (absolute path)`, '/');
       if (!dest) return;
       return void mut((p) => api.copy(scope, p, dest));
     }
     if (action === 'move') {
-      const dest = prompt(`移动 ${targets.size} 项到目录（绝对路径）`, '/');
+      const dest = prompt(`Move ${targets.size} item(s) to directory (absolute path)`, '/');
       if (!dest) return;
       return void mut((p) => api.move(scope, p, dest));
     }
     if (action === 'delete') {
-      if (!confirm(`删除选中的 ${targets.size} 项？（进回收站）`)) return;
+      if (!confirm(`Delete the ${targets.size} selected item(s)? (moved to trash)`)) return;
       return void mut((p) => api.remove(scope, p));
     }
   };
@@ -243,7 +251,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
     setMenu(null);
     const targets: Set<string> = sel.has(target.full) ? sel : new Set([target.full]);
     const paths = [...targets].filter((p) => PREVIEW_IMAGE.test(p));
-    if (!paths.length) { setError('所选项目中没有可旋转的图片'); return; }
+    if (!paths.length) { setError('No image found among the selected items'); return; }
     setError('');
     try { await api.rotate(scope, paths, angle); bumpThumbs(); clearSel(); refresh(); }
     catch (e) { setError((e as Error).message); }
@@ -259,54 +267,54 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
       <header className="topbar">
         <div className="brand">StarStack</div>
         <div className="scopes">
-          <button className={tab === 'files' && scope === 'me' ? 'on' : ''} onClick={() => { setTab('files'); setScope('me'); setCwd('/'); setSel(new Set()); }}>我的空间</button>
-          <button className={tab === 'files' && scope === 'share' ? 'on' : ''} onClick={() => { setTab('files'); setScope('share'); setCwd('/'); setSel(new Set()); }}>共享盘</button>
+          <button className={tab === 'files' && scope === 'me' ? 'on' : ''} onClick={() => { setTab('files'); setScope('me'); setCwd('/'); setSel(new Set()); }}>My Space</button>
+          <button className={tab === 'files' && scope === 'share' ? 'on' : ''} onClick={() => { setTab('files'); setScope('share'); setCwd('/'); setSel(new Set()); }}>Shared Drive</button>
         </div>
         <nav className="tabs">
-          <button className={tab === 'files' ? 'on' : ''} onClick={() => setTab('files')}>文件</button>
-          <button className={tab === 'trash' ? 'on' : ''} onClick={() => setTab('trash')}>回收站</button>
-          <button className={tab === 'share' ? 'on' : ''} onClick={() => setTab('share')}>分享</button>
-          {user.is_admin && <button className={tab === 'admin' ? 'on' : ''} onClick={() => setTab('admin')}>管理</button>}
+          <button className={tab === 'files' ? 'on' : ''} onClick={() => setTab('files')}>Files</button>
+          <button className={tab === 'trash' ? 'on' : ''} onClick={() => setTab('trash')}>Trash</button>
+          <button className={tab === 'share' ? 'on' : ''} onClick={() => setTab('share')}>Shares</button>
+          {user.is_admin && <button className={tab === 'admin' ? 'on' : ''} onClick={() => setTab('admin')}>Admin</button>}
         </nav>
         <div className="spacer" />
-        <span className="muted">👤 {user.username}{user.is_admin ? ' (管理员)' : ''}</span>
-        <button className="ghost" onClick={onLogout}>退出</button>
+        <span className="muted">👤 {user.username}{user.is_admin ? ' (admin)' : ''}</span>
+        <button className="ghost" onClick={onLogout}>Sign out</button>
       </header>
 
       {tab === 'files' && (
         <>
           <div className="toolbar">
-            <button className="ghost ico" title="上传" onClick={() => fileRef.current?.click()}>⬆</button>
-            <button className="ghost ico" title="新建文件夹" onClick={mkdir}>＋</button>
-            <button className="ghost ico" title="刷新" onClick={refresh}>↻</button>
-            <button className="ghost ico" title="清除缩略图并重新生成" onClick={() => void clearThumbs()}>🧹</button>
+            <button className="ghost ico" title="Upload" onClick={() => fileRef.current?.click()}>⬆</button>
+            <button className="ghost ico" title="New folder" onClick={mkdir}>＋</button>
+            <button className="ghost ico" title="Refresh" onClick={refresh}>↻</button>
+            <button className="ghost ico" title="Clear thumbnails and regenerate" onClick={() => void clearThumbs()}>🧹</button>
             <input ref={fileRef} type="file" multiple hidden
               onChange={(e) => { if (e.target.files) void doUpload(Array.from(e.target.files)); e.target.value = ''; }} />
             <div className="spacer" />
-            <button className={`ghost toggle${showHidden ? ' on' : ''}`} title="显示/隐藏以 . 开头的文件"
+            <button className={`ghost toggle${showHidden ? ' on' : ''}`} title="Show/hide dotfiles"
               onClick={() => setShowHidden((v) => !v)}>
-              <span className="hidden-ico">{showHidden ? '◉' : '◎'}</span> 隐藏文件
+              <span className="hidden-ico">{showHidden ? '◉' : '◎'}</span> Hidden files
             </button>
             <div className="view-toggle">
               {view === 'list'
-                ? <button title="自动视图" onClick={() => { setView('grid'); setViewManual(true); }}>▦</button>
-                : <button title="自动视图" onClick={() => { setView('list'); setViewManual(true); }}>☰</button>}
+                ? <button title="Auto view" onClick={() => { setView('grid'); setViewManual(true); }}>▦</button>
+                : <button title="Auto view" onClick={() => { setView('list'); setViewManual(true); }}>☰</button>}
             </div>
           </div>
           {sel.size > 0 && (
             <div className="batchbar">
-              <span className="batch-count">已选 {sel.size} 项</span>
-              <button className="ghost ico" title="打包下载(选中)" onClick={() => void batch.download()}>⬇</button>
-              <button className="ghost ico" title="复制到…" onClick={() => void batch.copy()}>📋</button>
-              <button className="ghost ico" title="移动到…" onClick={() => void batch.move()}>➜</button>
-              <button className="ghost ico" title="删除选中" onClick={() => void batch.del()}>🗑</button>
-              <button className="ghost" onClick={clearSel}>取消选择 ✕</button>
+              <span className="batch-count">{sel.size} selected</span>
+              <button className="ghost ico" title="Download (zip)" onClick={() => void batch.download()}>⬇</button>
+              <button className="ghost ico" title="Copy to…" onClick={() => void batch.copy()}>📋</button>
+              <button className="ghost ico" title="Move to…" onClick={() => void batch.move()}>➜</button>
+              <button className="ghost ico" title="Delete selected" onClick={() => void batch.del()}>🗑</button>
+              <button className="ghost" onClick={clearSel}>Clear selection ✕</button>
             </div>
           )}
           <div className="pathbar">
-            <span className="path-scope">{scope === 'me' ? '我的空间' : '共享盘'}</span>
+            <span className="path-scope">{scope === 'me' ? 'My Space' : 'Shared Drive'}</span>
             <span className="sep">/</span>
-            <button className="link" onClick={() => go('/')} title="根目录">根</button>
+            <button className="link" onClick={() => go('/')} title="Root">root</button>
             {trail.map((seg, i) => (
               <span key={i}>
                 <span className="sep">/</span>
@@ -315,11 +323,18 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
             ))}
           </div>
           {error && <div className="banner err">{error}</div>}
+          {shareInfo && (
+            <div className="banner">
+              <span>Share link created:</span> <code>{shareInfo}</code>
+              <button className="ghost sm" onClick={() => { void navigator.clipboard?.writeText(shareInfo); }}>Copy</button>
+              <button className="ghost sm" onClick={() => setShareInfo('')}>Close</button>
+            </div>
+          )}
           <div ref={bodyRef} className={`body${drag ? ' drag' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
             onDragLeave={() => setDrag(false)}
             onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files) void doUpload(Array.from(e.dataTransfer.files)); }}>
-            {loading ? <p className="muted pad">加载中…</p> : visible.length === 0 ? <p className="muted pad">空目录 — 拖拽文件到此处上传{items.length ? '（隐藏文件已过滤，点“隐藏文件”可显示）' : ''}</p> : view === 'grid' ? <GridBulk
+            {loading ? <p className="muted pad">Loading…</p> : visible.length === 0 ? <p className="muted pad">Empty folder — drag files here to upload{items.length ? ' (hidden files filtered, click "Hidden files" to show)' : ''}</p> : view === 'grid' ? <GridBulk
               items={visible} nav={nav}
               cols={vw.width ? Math.max(1, Math.floor((vw.width + 14) / 186)) : 4}
               top={vw.top} height={vw.height}
@@ -346,19 +361,24 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
           <div className="menu-bg" onMouseDown={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
           <div className="ctxmenu" style={{ left: menu.x, top: menu.y }}>
             <div className="ctx-title">{menu.target.is_dir ? '📁' : '📄'} {menu.target.name}{menuN > 1 ? `  (+${menuN - 1})` : ''}</div>
-            <button disabled={menu.target.is_dir || menuN > 1 || !canPreview(menu.target.name)} onClick={() => menuAct('preview')}>👁 预览</button>
-            <button onClick={() => menuAct('download')}>⬇ {menuN > 1 ? `打包下载(${menuN})` : '下载'}</button>
+            <button disabled={menu.target.is_dir || menuN > 1 || !canPreview(menu.target.name)} onClick={() => menuAct('preview')}>👁 Preview</button>
+            <button onClick={() => menuAct('download')}>⬇ {menuN > 1 ? `Download zip (${menuN})` : 'Download'}</button>
+            <button disabled={menuN > 1 || !menu.target.is_dir} onClick={() => menuAct('share')}>🔗 Share folder</button>
             <div className="ctxsep" />
-            <button onClick={() => menuAct('copy')}>📋 {menuN > 1 ? `复制(${menuN})` : '复制到…'}</button>
-            <button onClick={() => menuAct('move')}>➜ {menuN > 1 ? `移动(${menuN})` : '移动到…'}</button>
-            <button disabled={menuN > 1} onClick={() => menuAct('rename')}>✏️ 重命名</button>
+            <button onClick={() => menuAct('copy')}>📋 {menuN > 1 ? `Copy (${menuN})` : 'Copy to…'}</button>
+            <button onClick={() => menuAct('move')}>➜ {menuN > 1 ? `Move (${menuN})` : 'Move to…'}</button>
+            <button disabled={menuN > 1} onClick={() => menuAct('rename')}>✏️ Rename</button>
+            {!menu.target.is_dir && PREVIEW_IMAGE.test(menu.target.name) && (
+              <>
+                <div className="ctxsep" />
+                <div className="ctx-label">Rotate image</div>
+                <button onClick={() => void rotateSel(90)}>⟳ Rotate 90° clockwise</button>
+                <button onClick={() => void rotateSel(-90)}>⟲ Rotate 90° counter-clockwise</button>
+                <button onClick={() => void rotateSel(180)}>⟲ Rotate 180°</button>
+              </>
+            )}
             <div className="ctxsep" />
-            <div className="ctx-label">旋转图片</div>
-            <button onClick={() => void rotateSel(90)}>⟳ 顺时针 90°</button>
-            <button onClick={() => void rotateSel(-90)}>⟲ 逆时针 90°</button>
-            <button onClick={() => void rotateSel(180)}>⟲ 旋转 180°</button>
-            <div className="ctxsep" />
-            <button className="danger" onClick={() => menuAct('delete')}>🗑 {menuN > 1 ? `删除(${menuN})` : '删除'}</button>
+            <button className="danger" onClick={() => menuAct('delete')}>🗑 {menuN > 1 ? `Delete (${menuN})` : 'Delete'}</button>
           </div>
         </>
           );
@@ -390,8 +410,8 @@ function ListBulk(props: {
   return (
     <div className="vlist">
       <div className="vlist-head">
-        <div className="vchk" onClick={() => onSelectAll()}><input type="checkbox" title="全选/取消" checked={selectAll} onChange={onSelectAll} /></div>
-        <div className="vname">名称</div><div className="vsize">大小</div><div className="vtime">修改时间</div>
+        <div className="vchk" onClick={() => onSelectAll()}><input type="checkbox" title="Select/deselect all" checked={selectAll} onChange={onSelectAll} /></div>
+        <div className="vname">Name</div><div className="vsize">Size</div><div className="vtime">Modified</div>
       </div>
       <div className="vlist-window" style={{ height: total * ROW_LIST + 6 }}>
         {rows.map((i) => {
@@ -411,7 +431,7 @@ function ListBulk(props: {
             <div key={it.full} style={style}
               className={`vlist-row${it.name.startsWith('.') ? ' ghidden' : ''}${sel.has(it.full) ? ' sel' : ''}`}
               onClick={() => onOpen(it)} onContextMenu={(e) => onMenu(e, it)}>
-              <div className="vchk" onClick={(e) => { e.stopPropagation(); onToggle(it.full); }} title="点击选择/取消选择">
+              <div className="vchk" onClick={(e) => { e.stopPropagation(); onToggle(it.full); }} title="Click to select/deselect">
                 <input type="checkbox" checked={sel.has(it.full)} onChange={() => onToggle(it.full)} onClick={(e) => e.stopPropagation()} />
               </div>
               <div className="vname">
@@ -464,7 +484,7 @@ function GridBulk(props: {
           <div key={it.full} style={style}
             className={`gcard${it.name.startsWith('.') ? ' ghidden' : ''}${sel.has(it.full) ? ' gcsel' : ''}`}
             onClick={() => onOpen(it)} onContextMenu={(e) => onMenu(e, it)}>
-            <span className="gcheck" onClick={(e) => { e.stopPropagation(); onToggle(it.full); }} title="点击选择/取消选择">
+            <span className="gcheck" onClick={(e) => { e.stopPropagation(); onToggle(it.full); }} title="Click to select/deselect">
               <input type="checkbox" checked={sel.has(it.full)} onChange={() => onToggle(it.full)} onClick={(e) => e.stopPropagation()} />
             </span>
             <div className="gthumb">
@@ -473,7 +493,7 @@ function GridBulk(props: {
                 : <span className="gico file">📄</span>}
             </div>
             <div className="gname" title={it.full} onClick={(e) => { e.stopPropagation(); onOpen(it); }}>{it.name}</div>
-            <div className="gmeta">{it.is_dir ? '文件夹' : fmtSize(it.size)}</div>
+            <div className="gmeta">{it.is_dir ? 'Folder' : fmtSize(it.size)}</div>
           </div>
         );
       })}
@@ -494,14 +514,14 @@ function TrashPage() {
   return (
     <div className="tab-page">
       <div className="toolbar">
-        <button className="ghost" onClick={() => act(() => api.trash.empty())}>清空回收站</button>
-        <button className="ghost" onClick={() => void reload()}>↻ 刷新</button>
+        <button className="ghost" onClick={() => act(() => api.trash.empty())}>Empty trash</button>
+        <button className="ghost" onClick={() => void reload()}>↻ Refresh</button>
         {err && <span className="err">{err}</span>}
       </div>
       <div className="body">
-        {list.length === 0 ? <p className="muted pad">回收站为空</p> : (
+        {list.length === 0 ? <p className="muted pad">Trash is empty</p> : (
           <table className="list">
-            <thead><tr><th>原位置</th><th>大小</th><th>删除时间</th><th>操作</th></tr></thead>
+            <thead><tr><th>Original location</th><th>Size</th><th>Deleted at</th><th>Actions</th></tr></thead>
             <tbody>
               {list.map((t) => (
                 <tr key={t.id}>
@@ -509,8 +529,8 @@ function TrashPage() {
                   <td>{fmtSize(t.size)}</td>
                   <td>{new Date(t.deleted_at).toLocaleString()}</td>
                   <td className="actions">
-                    <button className="ghost sm" onClick={() => act(() => api.trash.restore(t.id))}>恢复</button>
-                    <button className="ghost sm danger" onClick={() => confirm('彻底删除？') && act(() => api.trash.purge(t.id))}>彻底删除</button>
+                    <button className="ghost sm" onClick={() => act(() => api.trash.restore(t.id))}>Restore</button>
+                    <button className="ghost sm danger" onClick={() => confirm('Permanently delete?') && act(() => api.trash.purge(t.id))}>Delete forever</button>
                   </td>
                 </tr>
               ))}
@@ -525,69 +545,48 @@ function TrashPage() {
 function SharesPage() {
   const [shares, setShares] = useState<Share[]>([]);
   const [err, setErr] = useState('');
-  const [path, setPath] = useState('/');
-  const [scope, setScope] = useState<Scope>('me');
-  const [allowDown, setAllowDown] = useState(true);
-  const [pub, setPub] = useState<{ shares: Share[]; list: Entry[]; token: string; pw: string } | null>(null);
 
   const reload = useCallback(async () => {
     try { setShares((await api.share.list()).shares); } catch (e) { setErr((e as Error).message); }
   }, []);
   useEffect(() => { void reload(); }, [reload]);
 
-  const create = async () => {
-    if (!path) return; setErr('');
-    try {
-      await api.share.create({ scope, path, allow_down: allowDown });
-      setPath('/'); void reload();
-    } catch (e) { setErr((e as Error).message); }
+  const copyLink = async (token: string) => {
+    const link = `${location.origin}/api/share/${token}/list`;
+    try { await navigator.clipboard?.writeText(link); setErr(''); }
+    catch { setErr('Copy failed'); }
   };
-
-  const viewPublic = async (token: string, pw: string) => {
-    try { setPub({ shares: [], list: (await api.share.publicList(token, pw)).entries, token, pw }); }
-    catch (e) { setErr((e as Error).message); }
-  };
+  const scopeName = (sc: string) => (sc === 'me' ? 'My Space' : 'Shared Drive');
 
   return (
     <div className="tab-page">
       <div className="toolbar">
-        <select value={scope} onChange={(e) => setScope(e.target.value as Scope)} title="空间">
-          <option value="me">我的空间</option><option value="share">共享盘</option>
-        </select>
-        <input className="path-input" value={path} onChange={(e) => setPath(e.target.value)} placeholder="要分享的路径，如 /photos" />
-        <label className="chk"><input type="checkbox" checked={allowDown} onChange={(e) => setAllowDown(e.target.checked)} /> 允许下载</label>
-        <button className="ghost" onClick={create}>＋ 生成分享链接</button>
+        <span>Shared folders: {shares.length}</span>
+        <button className="ghost" onClick={() => void reload()}>↻ Refresh</button>
+        <span className="muted">Right-click a folder in My Space or Shared Drive to create a share</span>
         {err && <span className="err">{err}</span>}
       </div>
       <div className="body">
-        {pub && pub.list.length > 0 && (
-          <div className="pub banner">
-            <span>公开分享视图 <code>/api/share/{pub.token}/list</code></span>
-            <button className="ghost sm" onClick={() => setPub(null)}>关闭</button>
-            <ul>
-              {pub.list.map((e) => <li key={e.name}>{e.is_dir ? '📁' : '📄'} {e.name} {e.is_dir ? '' : fmtSize(e.size)}</li>)}
-            </ul>
-          </div>
-        )}
-        {shares.length === 0 && !pub ? <p className="muted pad">还没有分享链接</p> : (
+        {shares.length === 0 ? <p className="muted pad">No shares yet — right-click a folder to create one</p> : (
           <table className="list">
-            <thead><tr><th>路径</th><th>Token</th><th>可下载</th><th>次数</th><th>状态</th><th>操作</th></tr></thead>
+            <thead><tr><th>Space</th><th>Path</th><th>Share link</th><th>Download</th><th>Uses</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>
               {shares.map((s) => {
-                const expired = s.expires_at && new Date(s.expires_at).getTime() < Date.now();
+                const et = s.expires_at ? new Date(s.expires_at).getTime() : 0;
+                const never = !et || et <= 0 || new Date(s.expires_at).getUTCFullYear() < 2000;
+                const expired = !never && et < Date.now();
+                const link = `${location.origin}/api/share/${s.token}/list`;
                 return (
                   <tr key={s.token}>
+                    <td>{scopeName(s.scope)}</td>
                     <td>{s.path}</td>
-                    <td><code>{s.token.slice(0, 8)}…</code>
-                      <button className="ghost sm" onClick={() => { void (async () => {
-                        try { await api.share.publicList(s.token); }
-                        catch (e) { setErr((e as Error).message); }
-                      })(); viewPublic(s.token, ''); }}>试览</button>
+                    <td><code title={link}>{s.token.slice(0, 8)}…</code>
+                      <button className="ghost sm" onClick={() => void copyLink(s.token)}>Copy link</button>
                     </td>
                     <td>{s.allow_down ? '✓' : '—'}</td>
                     <td>{s.used}{s.max_uses ? `/${s.max_uses}` : ''}</td>
-                    <td>{expired ? '已过期' : '有效'}</td>
-                    <td className="actions"><button className="ghost sm danger" onClick={() => confirm('删除分享？') && void api.share.remove(s.token).then(reload)}>删除</button></td>
+                    <td>{expired ? 'Expired' : 'Active'}</td>
+                    <td className="actions"><button className="ghost sm danger" onClick={() => confirm('Delete this share?') && void api.share.remove(s.token).then(reload)}>Delete</button></td>
                   </tr>
                 );
               })}
@@ -606,32 +605,32 @@ function AdminPage() {
   const reload = useCallback(async () => { try { setUsers((await api.users.list()).users); } catch (e) { setErr((e as Error).message); } }, []);
   useEffect(() => { void reload(); }, [reload]);
   const create = async () => { if (!nu || !np) return; try { await api.users.create(nu, np, admin); setNu(''); setNp(''); void reload(); } catch (e) { setErr((e as Error).message); } };
-  const resetPw = async (id: number, name: string) => { const pw = prompt(`为用户 ${name} 设置新密码`); if (pw) { try { await api.users.resetPassword(id, pw); } catch (e) { setErr((e as Error).message); } } };
+  const resetPw = async (id: number, name: string) => { const pw = prompt(`Set a new password for user ${name}`); if (pw) { try { await api.users.resetPassword(id, pw); } catch (e) { setErr((e as Error).message); } } };
   const del = async (id: number, name: string) => {
-    if (!confirm(`确定删除用户「${name}」？此操作不可恢复，用户的会话与访问权限将立即失效。`)) return;
+    if (!confirm(`Delete user "${name}"? This cannot be undone; the user's session and access will be revoked immediately.`)) return;
     try { await api.users.delete(id); void reload(); } catch (e) { setErr((e as Error).message); }
   };
 
   return (
     <div className="tab-page">
       <div className="toolbar">
-        <input className="path-input" placeholder="新用户名" value={nu} onChange={(e) => setNu(e.target.value)} />
-        <input className="path-input" placeholder="初始密码" type="password" value={np} onChange={(e) => setNp(e.target.value)} />
-        <label className="chk"><input type="checkbox" checked={admin} onChange={(e) => setAdmin(e.target.checked)} /> 管理员</label>
-        <button className="ghost" onClick={create}>＋ 创建用户</button>
+        <input className="path-input" placeholder="New username" value={nu} onChange={(e) => setNu(e.target.value)} />
+        <input className="path-input" placeholder="Initial password" type="password" value={np} onChange={(e) => setNp(e.target.value)} />
+        <label className="chk"><input type="checkbox" checked={admin} onChange={(e) => setAdmin(e.target.checked)} /> Admin</label>
+        <button className="ghost" onClick={create}>＋ Create user</button>
         {err && <span className="err">{err}</span>}
       </div>
       <div className="body">
         <table className="list">
-          <thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead>
+          <thead><tr><th>ID</th><th>Username</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody>
             {users.map((u) => (
               <tr key={u.id}>
-                <td>{u.id}</td><td>{u.username}</td><td>{u.is_admin ? '管理员' : '用户'}</td><td>{u.disabled ? '已停用' : '正常'}</td>
+                <td>{u.id}</td><td>{u.username}</td><td>{u.is_admin ? 'Admin' : 'User'}</td><td>{u.disabled ? 'Disabled' : 'Active'}</td>
                 <td className="actions">
-                  <button className="ghost sm" onClick={() => resetPw(u.id, u.username ?? String(u.id))}>重置密码</button>
-                  <button className="ghost sm" onClick={() => void api.users.setState(u.id, !u.disabled).then(reload)}>{u.disabled ? '启用' : '停用'}</button>
-                  <button className="ghost sm danger" title="删除用户" onClick={() => void del(u.id, u.username ?? String(u.id))}>删除</button>
+                  <button className="ghost sm" onClick={() => resetPw(u.id, u.username ?? String(u.id))}>Reset password</button>
+                  <button className="ghost sm" onClick={() => void api.users.setState(u.id, !u.disabled).then(reload)}>{u.disabled ? 'Enable' : 'Disable'}</button>
+                  <button className="ghost sm danger" title="Delete user" onClick={() => void del(u.id, u.username ?? String(u.id))}>Delete</button>
                 </td>
               </tr>
             ))}
@@ -645,7 +644,7 @@ function AdminPage() {
 function PreviewModal({ item, scope, onClose }: { item: Item; scope: Scope; onClose: () => void }) {
   const [text, setText] = useState<string | null>(null);
   useEffect(() => {
-    if (PREVIEW_TEXT.test(item.name)) { setText(null); api.preview.text(scope, item.full).then(setText).catch(() => setText('（无法读取）')); }
+    if (PREVIEW_TEXT.test(item.name)) { setText(null); api.preview.text(scope, item.full).then(setText).catch(() => setText('(unreadable)')); }
   }, [item, scope]);
   const raw = api.preview.rawURL(scope, item.full);
 
@@ -653,16 +652,16 @@ function PreviewModal({ item, scope, onClose }: { item: Item; scope: Scope; onCl
     <div className="modal-bg" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-actions">
-          <button className="ghost" title="下载" onClick={() => void api.downloadBlob(scope, item.full, item.name)}>⬇</button>
-          <button className="ghost" title="关闭 (Esc)" onClick={onClose}>✕</button>
+          <button className="ghost" title="Download" onClick={() => void api.downloadBlob(scope, item.full, item.name)}>⬇</button>
+          <button className="ghost" title="Close (Esc)" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
           {PREVIEW_IMAGE.test(item.name) ? <img className="preview-img" src={raw} alt={item.name} />
             : PREVIEW_VIDEO.test(item.name) ? <video className="preview-media" src={raw} controls autoPlay />
             : PREVIEW_AUDIO.test(item.name) ? <audio src={raw} controls autoPlay />
             : PREVIEW_PDF.test(item.name) ? <iframe className="preview-iframe" src={raw} title={item.name} />
-            : PREVIEW_TEXT.test(item.name) ? <pre className="preview-text">{text ?? '加载中…'}</pre>
-            : <p className="muted pad">该文件不支持预览，请下载查看。</p>}
+            : PREVIEW_TEXT.test(item.name) ? <pre className="preview-text">{text ?? 'Loading…'}</pre>
+            : <p className="muted pad">This file cannot be previewed — please download it to view.</p>}
         </div>
       </div>
     </div>
