@@ -110,10 +110,10 @@ select { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
 .gactions { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 8px 8px; }
 .gactions .ghost.sm { background: var(--bg); }
 
-/* batch bar + icon buttons */
-.batchbar { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: rgba(22,25,31,0.94); border: 1px solid var(--accent); border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.45); z-index: 80; }
-.batchbar .batch-count { margin-right: 4px; font-weight: 600; color: var(--text); }
-.toolbar .ghost.ico, .batchbar .ghost.ico { font-size: 15px; line-height: 1; }
+/* batch actions + icon buttons */
+.toolbar .batch-count { margin-right: 4px; font-weight: 600; color: var(--text); }
+.toolbar .ghost.ico { font-size: 15px; line-height: 1; }
+.toolbar .ghost.ico.danger { color: var(--danger); }
 .actions .ghost.sm.ico { font-size: 13px; line-height: 1; padding: 3px 6px; }
 th.chk, td.chk { width: 34px; text-align: center; white-space: nowrap; padding: 8px 4px; }
 td.chk input { vertical-align: middle; }

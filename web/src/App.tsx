@@ -288,33 +288,37 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
       {tab === 'files' && (
         <>
           <div className="toolbar">
-            <button className="ghost ico" title="Upload" onClick={() => fileRef.current?.click()}>⬆</button>
-            <button className="ghost ico" title="New folder" onClick={mkdir}>＋</button>
-            <button className="ghost ico" title="Refresh" onClick={refresh}>↻</button>
-            <button className="ghost ico" title="Clear thumbnails and regenerate" onClick={() => void clearThumbs()}>🧹</button>
-            <input ref={fileRef} type="file" multiple hidden
-              onChange={(e) => { if (e.target.files) void doUpload(Array.from(e.target.files)); e.target.value = ''; }} />
-            <div className="spacer" />
-            <button className={`ghost toggle${showHidden ? ' on' : ''}`} title="Show/hide dotfiles"
-              onClick={() => setShowHidden((v) => !v)}>
-              <span className="hidden-ico">{showHidden ? '◉' : '◎'}</span> Hidden files
-            </button>
-            <div className="view-toggle">
-              {view === 'list'
-                ? <button title="Auto view" onClick={() => { setView('grid'); setViewManual(true); }}>▦</button>
-                : <button title="Auto view" onClick={() => { setView('list'); setViewManual(true); }}>☰</button>}
-            </div>
+            {sel.size > 0 ? (
+              <>
+                <span className="batch-count">{sel.size} selected</span>
+                <button className="ghost ico" title="Download selected (zip)" onClick={() => void batch.download()}>⬇</button>
+                <button className="ghost ico" title="Copy to…" onClick={() => void batch.copy()}>📋</button>
+                <button className="ghost ico" title="Move to…" onClick={() => void batch.move()}>➜</button>
+                <button className="ghost ico danger" title="Delete selected" onClick={() => void batch.del()}>🗑</button>
+                <div className="spacer" />
+                <button className="ghost" onClick={clearSel}>Cancel ✕</button>
+              </>
+            ) : (
+              <>
+                <button className="ghost ico" title="Upload" onClick={() => fileRef.current?.click()}>⬆</button>
+                <button className="ghost ico" title="New folder" onClick={mkdir}>＋</button>
+                <button className="ghost ico" title="Refresh" onClick={refresh}>↻</button>
+                <button className="ghost ico" title="Clear thumbnails and regenerate" onClick={() => void clearThumbs()}>🧹</button>
+                <input ref={fileRef} type="file" multiple hidden
+                  onChange={(e) => { if (e.target.files) void doUpload(Array.from(e.target.files)); e.target.value = ''; }} />
+                <div className="spacer" />
+                <button className={`ghost toggle${showHidden ? ' on' : ''}`} title="Show/hide dotfiles"
+                  onClick={() => setShowHidden((v) => !v)}>
+                  <span className="hidden-ico">{showHidden ? '◉' : '◎'}</span> Hidden files
+                </button>
+                <div className="view-toggle">
+                  {view === 'list'
+                    ? <button title="Auto view" onClick={() => { setView('grid'); setViewManual(true); }}>▦</button>
+                    : <button title="Auto view" onClick={() => { setView('list'); setViewManual(true); }}>☰</button>}
+                </div>
+              </>
+            )}
           </div>
-          {sel.size > 0 && (
-            <div className="batchbar">
-              <span className="batch-count">{sel.size} selected</span>
-              <button className="ghost ico" title="Download (zip)" onClick={() => void batch.download()}>⬇</button>
-              <button className="ghost ico" title="Copy to…" onClick={() => void batch.copy()}>📋</button>
-              <button className="ghost ico" title="Move to…" onClick={() => void batch.move()}>➜</button>
-              <button className="ghost ico" title="Delete selected" onClick={() => void batch.del()}>🗑</button>
-              <button className="ghost" onClick={clearSel}>Clear selection ✕</button>
-            </div>
-          )}
           <div className="pathbar">
             <span className="path-scope">{scope === 'me' ? 'My Space' : 'Shared Drive'}</span>
             <span className="sep">/</span>
