@@ -112,7 +112,8 @@ select { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
 
 /* batch actions + icon buttons */
 .toolbar .batch-count { margin-right: 4px; font-weight: 600; color: var(--text); }
-.toolbar .ghost.ico { font-size: 15px; line-height: 1; }
+.toolbar .ghost.ico { font-size: 15px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+.toolbar .ghost.ico svg { display: block; }
 .toolbar .ghost.ico.danger { color: var(--danger); }
 .actions .ghost.sm.ico { font-size: 13px; line-height: 1; padding: 3px 6px; }
 th.chk, td.chk { width: 34px; text-align: center; white-space: nowrap; padding: 8px 4px; }

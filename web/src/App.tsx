@@ -300,7 +300,11 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
               </>
             ) : (
               <>
-                <button className="ghost ico" title="Upload" onClick={() => fileRef.current?.click()}>⬆</button>
+                <button className="ghost ico" title="Upload" onClick={() => fileRef.current?.click()}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 16V4" /><path d="M6 10l6-6 6 6" /><path d="M4 20h16" />
+                  </svg>
+                </button>
                 <button className="ghost ico" title="New folder" onClick={mkdir}>＋</button>
                 <button className="ghost ico" title="Refresh" onClick={refresh}>↻</button>
                 <button className="ghost ico" title="Clear thumbnails and regenerate" onClick={() => void clearThumbs()}>🧹</button>
