@@ -276,7 +276,6 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
           <button className={tab === 'files' && scope === 'share' ? 'on' : ''} onClick={() => { setTab('files'); setScope('share'); setCwd('/'); setSel(new Set()); }}>Shared Drive</button>
         </div>
         <nav className="tabs">
-          <button className={tab === 'files' ? 'on' : ''} onClick={() => setTab('files')}>Files</button>
           <button className={tab === 'trash' ? 'on' : ''} onClick={() => setTab('trash')}>Trash</button>
           <button className={tab === 'share' ? 'on' : ''} onClick={() => setTab('share')}>Shares</button>
           {user.is_admin && <button className={tab === 'admin' ? 'on' : ''} onClick={() => setTab('admin')}>Admin</button>}
