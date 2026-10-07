@@ -256,11 +256,6 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
     try { await api.rotate(scope, paths, angle); bumpThumbs(); clearSel(); refresh(); }
     catch (e) { setError((e as Error).message); }
   };
-  const clearThumbs = async () => {
-    setError('');
-    try { await api.preview.clear(); bumpThumbs(); refresh(); }
-    catch (e) { setError((e as Error).message); }
-  };
   // Copy the share link, then close the modal.
   const shareCopy = async () => {
     try { await navigator.clipboard?.writeText(shareInfo); } catch { /* ignore */ }
@@ -307,7 +302,6 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
                 </button>
                 <button className="ghost ico" title="New folder" onClick={mkdir}>＋</button>
                 <button className="ghost ico" title="Refresh" onClick={refresh}>↻</button>
-                <button className="ghost ico" title="Clear thumbnails and regenerate" onClick={() => void clearThumbs()}>🧹</button>
                 <input ref={fileRef} type="file" multiple hidden
                   onChange={(e) => { if (e.target.files) void doUpload(Array.from(e.target.files)); e.target.value = ''; }} />
                 <div className="spacer" />

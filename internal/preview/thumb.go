@@ -128,21 +128,6 @@ func shortHash(path string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
-// ClearAll wipes every cached thumbnail (disk + memory). Thumbnails are
-// regenerated lazily on the next request from the current file bytes, so after
-// a batch of edits/rotations you can force a full re-sync with originals.
-func (s *Service) ClearAll() error {
-	dir := filepath.Join(s.cacheDir, "thumb")
-	if err := os.RemoveAll(dir); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	s.lru.Purge()
-	return nil
-}
-
 func renderThumb(imagePath string, size, quality int) ([]byte, error) {
 	src, err := os.Open(imagePath)
 	if err != nil {
