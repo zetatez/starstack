@@ -307,7 +307,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
                 <div className="spacer" />
                 <button className={`ghost toggle${showHidden ? ' on' : ''}`} title="Show/hide dotfiles"
                   onClick={() => setShowHidden((v) => !v)}>
-                  <span className="hidden-ico">{showHidden ? '◉' : '◎'}</span> Hidden files
+                  <span className="hidden-ico">{showHidden ? '◉' : '◎'}</span>
                 </button>
                 <div className="view-toggle">
                   {view === 'list'
