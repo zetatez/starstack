@@ -98,15 +98,21 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [vw, setVw] = useState({ top: 0, height: 600, width: 0 });
   useEffect(() => {
+    if (tab !== 'files') return;
     const el = bodyRef.current;
     if (!el) return;
-    const upd = () => setVw((v) => ({ ...v, top: el.scrollTop, height: el.clientHeight || 600, width: el.clientWidth || 0 }));
+    const upd = () => setVw((v) => {
+      const width = el.clientWidth || 0;
+      const height = el.clientHeight || 600;
+      const top = el.scrollTop;
+      return v.width === width && v.height === height && v.top === top ? v : { top, height, width };
+    });
     upd();
     const ro = new ResizeObserver(upd);
     ro.observe(el);
     el.addEventListener('scroll', upd, { passive: true });
     return () => { ro.disconnect(); el.removeEventListener('scroll', upd); };
-  }, []);
+  }, [tab]);
 
   const load = useCallback(async (sc: Scope, dir: string) => {
     setLoading(true); setError('');
@@ -152,6 +158,10 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
   const grandPath = upPath(cwd, 2);
   const showUp = parentPath !== cwd;
   const showUp2 = parentPath !== cwd && grandPath !== parentPath;
+  // Grid layout: size columns/cards to use the full body width.
+  const bodyW = vw.width || (typeof window !== 'undefined' ? window.innerWidth : 1200);
+  const gridCols = Math.max(1, Math.floor((bodyW + GAP) / (CARD_W + GAP)));
+  const cardW = Math.max(CARD_W, Math.floor((bodyW - (gridCols - 1) * GAP) / gridCols));
 
   interface NavItem { key: string; label: string; title: string; go: string }
   const nav: NavItem[] = [];
@@ -353,7 +363,7 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
             onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files) void doUpload(Array.from(e.dataTransfer.files)); }}>
             {loading ? <p className="muted pad">Loading…</p> : visible.length === 0 ? <p className="muted pad">Empty folder — drag files here to upload{items.length ? ' (hidden files filtered, click "Hidden files" to show)' : ''}</p> : view === 'grid' ? <GridBulk
               items={visible} nav={nav}
-              cols={vw.width ? Math.max(1, Math.floor((vw.width + 14) / 186)) : 4}
+              cols={gridCols} cardW={cardW}
               top={vw.top} height={vw.height}
               scope={scope} sel={sel} isImage={isImage}
               onToggle={toggleSel} onOpen={openItem} onMenu={openMenu} onNav={go} /> : (
@@ -468,12 +478,12 @@ function ListBulk(props: {
 /** Virtualized grid: only renders cells within the viewport (+overscan). */
 function GridBulk(props: {
   items: Item[]; nav: { key: string; label: string; title: string; go: string }[];
-  cols: number; top: number; height: number; scope: Scope; sel: Set<string>;
+  cols: number; cardW: number; top: number; height: number; scope: Scope; sel: Set<string>;
   isImage: (n: string) => boolean;
   onToggle: (full: string) => void; onOpen: (it: Item) => void;
   onMenu: (e: React.MouseEvent, it: Item) => void; onNav: (dir: string) => void;
 }) {
-  const { items, nav, cols, top, height, scope, sel, isImage, onToggle, onOpen, onMenu, onNav } = props;
+  const { items, nav, cols, cardW, top, height, scope, sel, isImage, onToggle, onOpen, onMenu, onNav } = props;
   const totCells = nav.length + items.length;
   const overscanRows = 2; // prefetch ahead while idle
   const startIdx = Math.max(0, Math.floor((top - overscanRows*ROW_H) / ROW_H) * cols);
@@ -486,7 +496,7 @@ function GridBulk(props: {
     <div className="grid-v" style={{ height: rows * ROW_H + 12 }}>
       {cells.map((i) => {
         const r = Math.floor(i / cols), c = i % cols;
-        const style: React.CSSProperties = { width: CARD_W, height: ROW_H - GAP, transform: `translate(${c * (CARD_W + GAP)}px, ${r * ROW_H}px)` };
+        const style: React.CSSProperties = { width: cardW, height: ROW_H - GAP, transform: `translate(${c * (cardW + GAP)}px, ${r * ROW_H}px)` };
         if (i < nav.length) {
           const n = nav[i];
           return (
