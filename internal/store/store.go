@@ -101,6 +101,13 @@ func (s *Store) CountUsers() (int, error) {
 	return n, err
 }
 
+// CountAdmins returns the number of users with admin role.
+func (s *Store) CountAdmins() int {
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE is_admin = 1`).Scan(&n)
+	return n
+}
+
 func (s *Store) CreateUser(username, passwordHash string, isAdmin bool) (int64, error) {
 	res, err := s.db.Exec(
 		`INSERT INTO users(username, password_hash, is_admin, created_at) VALUES(?,?,?,?)`,

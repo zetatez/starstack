@@ -607,6 +607,10 @@ function AdminPage() {
   useEffect(() => { void reload(); }, [reload]);
   const create = async () => { if (!nu || !np) return; try { await api.users.create(nu, np, admin); setNu(''); setNp(''); void reload(); } catch (e) { setErr((e as Error).message); } };
   const resetPw = async (id: number, name: string) => { const pw = prompt(`为用户 ${name} 设置新密码`); if (pw) { try { await api.users.resetPassword(id, pw); } catch (e) { setErr((e as Error).message); } } };
+  const del = async (id: number, name: string) => {
+    if (!confirm(`确定删除用户「${name}」？此操作不可恢复，用户的会话与访问权限将立即失效。`)) return;
+    try { await api.users.delete(id); void reload(); } catch (e) { setErr((e as Error).message); }
+  };
 
   return (
     <div className="tab-page">
@@ -627,6 +631,7 @@ function AdminPage() {
                 <td className="actions">
                   <button className="ghost sm" onClick={() => resetPw(u.id, u.username ?? String(u.id))}>重置密码</button>
                   <button className="ghost sm" onClick={() => void api.users.setState(u.id, !u.disabled).then(reload)}>{u.disabled ? '启用' : '停用'}</button>
+                  <button className="ghost sm danger" title="删除用户" onClick={() => void del(u.id, u.username ?? String(u.id))}>删除</button>
                 </td>
               </tr>
             ))}

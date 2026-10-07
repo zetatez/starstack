@@ -99,6 +99,7 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/users", s.handleListUsers)
 			r.Patch("/users/{id}/state", s.handleSetUserState)
 			r.Post("/users/{id}/password", s.handleResetPassword)
+			r.Delete("/users/{id}", s.handleDeleteUser)
 			r.Get("/me", s.handleMe)
 
 			r.Get("/fs/list", s.handleList)
@@ -201,15 +202,19 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	// First registered user is the admin.
-	admin := false
+	// Only the very first login bootstraps the admin account. After that,
+	// unknown usernames are rejected, so deleted users cannot recreate
+	// themselves by logging in again.
 	count, err := s.store.CountUsers()
-	if err == nil && count == 0 {
-		admin = true
-	}
-	if err := s.ensureUser(req.Username, req.Password, admin); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
 		return
+	}
+	if count == 0 {
+		if err := s.ensureUser(req.Username, req.Password, true); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	access, refresh, u, err := s.auth.Login(req.Username, req.Password)
 	if err != nil {
@@ -410,6 +415,40 @@ func (s *Server) handleResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.UpdatePassword(id, hash); err != nil {
+		writeErr(w, http.StatusInternalServerError, "db error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleDeleteUser deletes a user (admin only). Guards: cannot delete your own
+// account, and the last remaining admin cannot be removed.
+func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	me := s.currentUser(r)
+	if !me.IsAdmin {
+		writeErr(w, http.StatusForbidden, "admin only")
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad id")
+		return
+	}
+	if id == me.ID {
+		writeErr(w, http.StatusBadRequest, "cannot delete your own account")
+		return
+	}
+	u, err := s.store.GetUserByID(id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	// Refuse to drop the final admin so the system is never locked out.
+	if u.IsAdmin && s.store.CountAdmins() <= 1 {
+		writeErr(w, http.StatusBadRequest, "cannot delete the last admin")
+		return
+	}
+	if err := s.store.DeleteUser(id); err != nil {
 		writeErr(w, http.StatusInternalServerError, "db error")
 		return
 	}

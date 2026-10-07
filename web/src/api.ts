@@ -183,6 +183,7 @@ export const api = {
       request('PATCH', `/api/users/${id}/state`, { disabled }),
     resetPassword: (id: number, pw: string) =>
       request('POST', `/api/users/${id}/password`, { password: pw }),
+    delete: (id: number) => request('DELETE', `/api/users/${id}`),
   },
   me: () => request<UserRow>('GET', '/api/me'),
   upload: async (scope: string, dir: string, files: File[]) => {
