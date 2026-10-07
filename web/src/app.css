@@ -145,6 +145,14 @@ td.namecell .type { margin-right: 6px; opacity: 0.85; }
 .preview-iframe { width: 100%; height: 100%; border: none; }
 .preview-text { margin: 0; padding: 60px 40px 24px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 13px/1.6 ui-monospace, Menlo, Consolas, monospace; color: var(--text); width: 100%; height: 100%; box-sizing: border-box; }
 
+/* share link modal */
+.share-modal { width: min(90vw, 480px); height: auto; padding: 20px; }
+.share-modal .modal-actions { position: static; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.share-modal .modal-body { position: static; display: block; }
+.share-modal .modal-title { color: var(--text); font-weight: 600; }
+.share-modal .path-input { width: 100%; margin: 10px 0 14px; box-sizing: border-box; }
+.share-modal .modal-btns { display: flex; justify-content: flex-end; gap: 8px; }
+
 .pub.banner { display: block; padding: 10px 16px; border-bottom: 1px solid var(--border); }
 .pub.banner code { background: var(--bg); padding: 2px 6px; border-radius: 4px; }
 .pub.banner ul { margin: 8px 0 0; padding-left: 20px; }

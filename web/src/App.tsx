@@ -261,6 +261,11 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
     try { await api.preview.clear(); bumpThumbs(); refresh(); }
     catch (e) { setError((e as Error).message); }
   };
+  // Copy the share link, then close the modal.
+  const shareCopy = async () => {
+    try { await navigator.clipboard?.writeText(shareInfo); } catch { /* ignore */ }
+    setShareInfo('');
+  };
 
   return (
     <div className="sheet">
@@ -324,10 +329,21 @@ function Sheet({ user, onLogout }: { user: UserInfo; onLogout: () => void }) {
           </div>
           {error && <div className="banner err">{error}</div>}
           {shareInfo && (
-            <div className="banner">
-              <span>Share link created:</span> <code>{shareInfo}</code>
-              <button className="ghost sm" onClick={() => { void navigator.clipboard?.writeText(shareInfo); }}>Copy</button>
-              <button className="ghost sm" onClick={() => setShareInfo('')}>Close</button>
+            <div className="modal-bg" onMouseDown={() => setShareInfo('')}>
+              <div className="modal share-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-actions">
+                  <span className="modal-title">Share link created</span>
+                  <button className="ghost" title="Close (Esc)" onClick={() => setShareInfo('')}>✕</button>
+                </div>
+                <div className="modal-body">
+                  <p className="muted">Anyone with this link can view this folder:</p>
+                  <input className="path-input" readOnly value={shareInfo} onFocus={(e) => e.currentTarget.select()} />
+                  <div className="modal-btns">
+                    <button className="ghost" onClick={() => void shareCopy()}>Copy</button>
+                    <button className="ghost" onClick={() => setShareInfo('')}>Close</button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
           <div ref={bodyRef} className={`body${drag ? ' drag' : ''}`}
