@@ -73,20 +73,20 @@ fmt:                      ## gofmt the Go source
 ## ---- docker / deploy ----
 
 image:                    ## build the Docker image
-	docker build --network=host --build-arg VERSION=$(VERSION) -t $(IMAGE) -f Dockerfile .
+	DOCKER_BUILDKIT=1 docker build --allow=network.host --network=host --build-arg VERSION=$(VERSION) -t $(IMAGE) -f Dockerfile .
 
 docker: image
 	@echo "image ready: $(IMAGE)"
 
-up:                       ## build & start stack (docker-compose.yaml)
-	$(COMPOSE) up -d --build
+up: image                 ## build & start stack (docker-compose.yaml)
+	$(COMPOSE) up -d --no-build
 
 down:                     ## stop & remove stack
 	$(COMPOSE) down
 
-restart:                  ## rebuild & recreate the stack (down + up --build)
+restart: image            ## rebuild & recreate the stack
 	$(COMPOSE) down
-	$(COMPOSE) up -d --build
+	$(COMPOSE) up -d --no-build
 
 logs:                     ## tail stack logs
 	$(COMPOSE) logs -f --tail=100

@@ -2,22 +2,32 @@
 # ---- build backend ----
 FROM golang:1.26-alpine AS backend
 ARG VERSION=dev
+# Use a reachable Go module proxy (default proxy.golang.org is flaky here).
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
 COPY cmd ./cmd
 COPY internal ./internal
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath \
     -ldflags="-s -w -X main.version=${VERSION}" \
     -o /out/starstack ./cmd/starstack
 
 # ---- build frontend ----
 FROM node:22-alpine AS frontend
+ARG NPM_REGISTRY=https://registry.npmmirror.com
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-audit --no-fund --registry=${NPM_REGISTRY}
 COPY web/ ./
-RUN npm run build
+RUN --mount=type=cache,target=/root/.npm \
+    npm run build
 
 # ---- runtime: nginx serves static frontend and proxies /api to the Go API ----
 FROM nginx:1.27-alpine
